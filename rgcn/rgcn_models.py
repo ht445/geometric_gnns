@@ -12,20 +12,16 @@ import torch.nn.functional as functional
 # note: self-loops should be added before calling the forward function
 class RGCN(torch_geometric.nn.MessagePassing, ABC):
     def __init__(self, in_dimension: int, out_dimension: int, num_relations: int, num_bases: int, aggr: str):
-        super(RGCN, self).__init__(aggr=aggr)
+        super(RGCN, self).__init__()
         self.in_dimension = in_dimension  # the dimension of input entity embeddings
         self.out_dimension = out_dimension  # the dimension of output entity embeddings
         self.num_relations = num_relations  # the number of relations
         self.num_bases = num_bases  # the number of base matrices
         self.aggr = aggr  # the aggregation scheme to use
 
-        self.bases = torch.nn.Parameter(
-            torch.FloatTensor(self.num_bases, self.in_dimension, self.out_dimension)
-        )  # base matrices
+        self.bases = torch.nn.Parameter(torch.FloatTensor(self.num_bases, self.in_dimension, self.out_dimension))  # base matrices
         torch.nn.init.kaiming_uniform_(self.bases, nonlinearity="leaky_relu")
-        self.coefficients = torch.nn.Parameter(
-            torch.FloatTensor(self.num_relations, self.num_bases)
-        )  # relation-specific coefficients
+        self.coefficients = torch.nn.Parameter(torch.FloatTensor(self.num_relations, self.num_bases))  # relation-specific coefficients
         torch.nn.init.kaiming_uniform_(self.coefficients, nonlinearity="leaky_relu")
 
     # compute weights for given relation ids based on coefficients and bases
@@ -45,8 +41,7 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
     # edge_index: graph adjacency matrix in COO format, (2, num_edges);
     # edge_type: relation id list, and the order corresponds to edge_index, (num_edges);
     def forward(self, x: Tensor, edge_index: Tensor, edge_type: Tensor) -> Tensor:
-        out = self.propagate(x=x, edge_index=edge_index,
-                             edge_type=edge_type)  # propagate messages along edges and compute updated entity embeddings
+        out = self.propagate(x=x, edge_index=edge_index, edge_type=edge_type)  # propagate messages along edges and compute updated entity embeddings
         return out  # updated entity embeddings, (num_entities, out_dimension)
 
     # compute messages along edges
@@ -57,9 +52,7 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
         assert edge_type is not None, "edge_type is not given"
 
         relation_weights = self.compute_relation_weights(edge_type)  # (num_relations, in_dimension, out_dimension)
-        messages = torch.bmm(
-            x_j.unsqueeze(1), relation_weights
-        ).squeeze(1)  # unnormalized messages, (num_edges, out_dimension)
+        messages = torch.bmm(x_j.unsqueeze(1), relation_weights).squeeze(1)  # unnormalized messages, (num_edges, out_dimension)
 
         return messages
 
@@ -68,8 +61,7 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
     # index: target entity id list, (num_edges);
     # edge_type: as above, (num_edges);
     # ptr, dim_size: redundant parameters just to get rid of LSP violation warnings
-    def aggregate(self, inputs: Tensor, index: Tensor, edge_type: Tensor = None, ptr: Optional[Tensor] = None,
-                  dim_size: Optional[int] = None) -> Tensor:
+    def aggregate(self, inputs: Tensor, index: Tensor, edge_type: Tensor = None, ptr: Optional[Tensor] = None, dim_size: Optional[int] = None) -> Tensor:
         assert edge_type is not None, "edge_type is not given"
 
         one_hot_relations_for_edges = functional.one_hot(
@@ -84,12 +76,10 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
         relation_count = torch.gather(
             input=relation_count_for_edges, index=edge_type.view(-1, 1), dim=1
         )  # relation count for target entities selected according to edge_type (num_target_entities, 1)
-        normalization = 1. / torch.clip(input=relation_count,
-                                        min=1.)  # normalization constants for target entities, (num_target_entities, 1)
+        normalization = 1. / torch.clip(input=relation_count, min=1.)  # normalization constants for target entities, (num_target_entities, 1)
         inputs = inputs * normalization  # normalized messages (num_edges, out_dimension)
 
-        return torch_scatter.scatter(src=inputs, index=index, dim=0,
-                                     reduce=self.aggr)  # updated target entity embeddings, (num_entities, out_dimension)
+        return torch_scatter.scatter(src=inputs, index=index, dim=0, reduce=self.aggr)  # updated target entity embeddings, (num_entities, out_dimension)
 
     # update target entity embeddings with an activation function
     def update(self, inputs: Tensor):
@@ -99,13 +89,11 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
 # a link prediction network based on RGCN and DistMult *
 # *. Yang, Bishan, et al. "Embedding entities and relations for learning and inference in knowledge bases." arXiv preprint arXiv:1412.6575 (2014).
 class RgcnLP(torch.nn.Module):
-    def __init__(self, in_dimension: int, out_dimension: int, num_entities: int, num_relations: int, num_bases: int,
-                 aggr: str):
+    def __init__(self, in_dimension: int, out_dimension: int, num_entities: int, num_relations: int, num_bases: int, aggr: str):
         super(RgcnLP, self).__init__()
         assert in_dimension == out_dimension, "to use DistMult as the loss function, in_dimension should be equal to out_dimension"
         self.entity_embeds = torch.nn.Parameter(torch.FloatTensor(num_entities, in_dimension))
-        torch.nn.init.kaiming_uniform_(self.entity_embeds,
-                                       nonlinearity="leaky_relu")  # entity embeddings, (num_entities, in_dimension)
+        torch.nn.init.kaiming_uniform_(self.entity_embeds, nonlinearity="leaky_relu")  # entity embeddings, (num_entities, in_dimension)
 
         self.rgcn = RGCN(in_dimension, out_dimension, num_relations, num_bases, aggr)  # the rgcn encoder
 
@@ -113,16 +101,11 @@ class RgcnLP(torch.nn.Module):
     # triple_batch: positive and negative triples in the form of (head_entity_id, relation_id, tail_entity_id), (num_triples, 3);
     def forward(self, edge_index: Tensor, edge_type: Tensor, triple_batch: Tensor):
         # update entity embeddings via rgcn
-        updated_entity_embeds = self.rgcn(x=self.entity_embeds, edge_index=edge_index,
-                                          edge_type=edge_type)  # (num_entities, out_dimension)
-
+        updated_entity_embeds = self.rgcn(x=self.entity_embeds, edge_index=edge_index, edge_type=edge_type)  # (num_entities, out_dimension)
         # compute loss via DistMult, note: in_dimension == out_dimension
-        head_entity_embeds = torch.index_select(input=updated_entity_embeds, index=triple_batch[:, 0],
-                                                dim=0)  # (num_triples, out_dimension)
-        relation_matrices = self.rgcn.compute_relation_weights(
-            relation_ids=triple_batch[:, 1])  # (num_triples, in_dimension, out_dimension)
-        tail_entity_embeds = torch.index_select(input=updated_entity_embeds, index=triple_batch[:, 2],
-                                                dim=0)  # (num_triples, out_dimension)
+        head_entity_embeds = torch.index_select(input=updated_entity_embeds, index=triple_batch[:, 0], dim=0)  # (num_triples, out_dimension)
+        relation_matrices = self.rgcn.compute_relation_weights(relation_ids=triple_batch[:, 1])  # (num_triples, in_dimension, out_dimension)
+        tail_entity_embeds = torch.index_select(input=updated_entity_embeds, index=triple_batch[:, 2], dim=0)  # (num_triples, out_dimension)
         loss = torch.bmm(
             torch.bmm(
                 head_entity_embeds.unsqueeze(1), relation_matrices
@@ -151,9 +134,8 @@ def test_rgcnlp(edge_index, edge_type, triple_batch):
     print(loss)
 
 
-# test the above implemented models, feel free to add breakpoints to check how they run
+# test the above implemented models, you can add breakpoints to check how they run
 if __name__ == "__main__":
-    torch.manual_seed(1995)
     # create a toy graph with 3 entities, 2 relations, and 2 edges
     x = torch.FloatTensor(3, 6)
     edge_index = torch.LongTensor([[0, 1], [1, 2]])

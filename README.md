@@ -20,13 +20,13 @@ They are implemented based on [Pytorch Geometric](https://github.com/rusty1s/pyt
 Please refer to [Installation](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html) for the installation of torch-scatter and torch-geometric. 
 
 ----
-### Dataset
+### Dataset - FB15K237
 
-`./data/FB15K237` (https://github.com/thunlp/OpenKE/tree/OpenKE-PyTorch/benchmarks)
-
-* first line of each file: number of terms in the file;
-* other lines: triples in the format (head_entity_id, tail_entity_id, relation_id);
-* more details about the data are given in [Data](https://github.com/thunlp/OpenKE/blob/OpenKE-PyTorch/README.md).
+| file | first line | other lines |
+| ---- | ---- | ---- |
+| entity2id.txt | number of entities: 14,541 | entity_name + '\t' + entity_id |
+| relation2id.txt | number of relations: 237 | relation_name + '\t' + relation_id |
+| train2id.txt, valid2id.txt, test2id.txt | number of training/ validation/ testing triples: 272,115/ 17,535/ 20,466 | head_entity_id + ' ' + tail_entity_id + ' ' + relation_id |
 
 ----
 
