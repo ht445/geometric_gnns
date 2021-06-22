@@ -20,14 +20,19 @@ class RgcnMain:
         self.vt_batch_size = 500  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
         self.num_epochs = 100  # number of epochs
-        self.neg_num = 32  # number of negative triples for each positive triple
+        self.neg_num = 16  # number of negative triples for each positive triple
         self.valid_freq = 3  # validation frequency
+        self.patience = 2  # determines when to early stop
 
         # self.count: {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         # self.triples: {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
         # self.graph: the pytorch geometric graph consisting of training triples, Data(edge_index, edge_type);
-        # note: self-loops have been added to the graph; self_loop_id = num_relations - 1;
-        self.count, self.triples, self.graph = read_data(self.data_path)
+        # self.hr2t: {(head_entity_id, relation_id): [tail_entity_ids, ...]}
+        # self.tr2h: {(tail_entity_id, relation_id): [head_entity_ids, ...]}
+        # self.correct_heads: {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
+        # self.correct_tails: {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
+        # note: inverse relations and self-loops have been added to the graph; self_loop_id = num_relations - 1;
+        self.count, self.triples, self.graph, self.hr2t, self.tr2h, self.correct_heads, self.correct_tails = read_data(self.data_path)
 
         print("-----")
         print("### Running Time: `{}`".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -47,6 +52,7 @@ class RgcnMain:
         print("- number of training triples: `{}`".format(self.count["train"]))
         print("- number of validation triples: `{}`".format(self.count["valid"]))
         print("- number of testing triples: `{}`".format(self.count["test"]))
+        print("- patience: `{}`".format(self.patience))
 
     # model training
     def main(self):
@@ -78,10 +84,11 @@ class RgcnMain:
         train_triples = self.triples["train"]  # LongTensor, (num_train_triples, 3)
         highest_mrr = 0.
         print("#### training")
+        patience = self.patience
         for epoch in range(self.num_epochs):
             epoch_loss = 0.
             # sample self.neg_num negative triples for each training triple
-            neg_triples = negative_sampling(num_entities=self.count["entity"], num_triples=self.count["train"], neg_num=self.neg_num, train_triples=train_triples)  # (num_train_triples, neg_num, 3)
+            neg_triples = negative_sampling(num_entities=self.count["entity"], num_triples=self.count["train"], neg_num=self.neg_num, train_triples=train_triples, hr2t=self.hr2t, tr2h=self.tr2h)  # (num_train_triples, neg_num, 3)
             for batch in train_index_loader:
                 optimizer.zero_grad()
                 batch_pos_triples = torch.index_select(input=train_triples, index=batch, dim=0)  # (current_batch_size, 3)
@@ -99,11 +106,14 @@ class RgcnMain:
             if epoch % self.valid_freq == 0:
                 current_mrr = self.v_and_t("valid", valid_loader, rgcn_lp, epoch)
                 if highest_mrr < current_mrr:
+                    patience = self.patience
                     highest_mrr = current_mrr
                     torch.save(rgcn_lp.state_dict(), self.model_path)
                     print("- model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
                 else:
-                    break
+                    patience -= 1
+                    if patience == 0:
+                        break
         print("#### testing")
         self.v_and_t("test", test_loader, rgcn_lp, 0)
         print("-----")
@@ -119,7 +129,9 @@ class RgcnMain:
         for batch in index_loader:
             # print("validation batch: {}, time: {}".format(batch_count, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             triples = torch.index_select(input=self.triples[name], index=batch, dim=0)  # (vt_batch_size, 3)
-            ranks += self.ranking(model, triples)
+            correct_heads = torch.index_select(input=self.correct_heads[name], index=batch, dim=0)  # (vt_batch_size, num_entities)
+            correct_tails = torch.index_select(input=self.correct_tails[name], index=batch, dim=0)  # (vt_batch_size, num_entities)
+            ranks += self.ranking(model, triples, correct_heads, correct_tails)
             batch_count += 1
         ranks = ranks / batch_count
         mean_ranks = torch.mean(ranks, dim=1)  # (5)
@@ -143,7 +155,8 @@ class RgcnMain:
     # compute the mean rank (MR), mean reciprocal rank (MRR) and hit@1, 3, 10 for the given triples
     # model: the link prediction model
     # triples: the triples for validation/test, (num_valid/test_triples, 3), num_valid/test_triples = vt_batch_size mostly
-    def ranking(self, model: RgcnLP, triples: Tensor) -> Tensor:
+    # correct_heads, correct_tails: LongTensor(num_valid_triples, num_entities)
+    def ranking(self, model: RgcnLP, triples: Tensor, correct_heads: Tensor, correct_tails: Tensor) -> Tensor:
         # candidate entities for each validation/testing triple
         entities = torch.arange(self.count["entity"]).repeat(triples.size()[0], 1).unsqueeze(2)  # (num_valid/test_triples, num_entities, 1)
 
@@ -162,8 +175,9 @@ class RgcnMain:
         with torch.no_grad():
             new_head_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_head_triples)  # (num_valid/test_triples * num_entities)
             new_head_scores = new_head_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
-            correct_scores = torch.gather(input=new_head_scores, dim=1, index=heads)  # (num_valid/test_triples, 1)
-            false_positives = torch.nonzero(torch.BoolTensor(new_head_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
+            filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (num_valid/test_triples, num_entities)
+            correct_scores = torch.gather(input=filtered_head_scores, dim=1, index=heads)  # (num_valid/test_triples, 1)
+            false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             head_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
             head_ranks = head_ranks + 1  # ranks of correct head entities
 
@@ -175,8 +189,9 @@ class RgcnMain:
 
             new_tail_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_tail_triples)  # (num_valid/test_triples * num_entities)
             new_tail_scores = new_tail_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
-            correct_scores = torch.gather(input=new_tail_scores, dim=1, index=tails)  # (num_valid/test_triples, 1)
-            false_positives = torch.nonzero(torch.BoolTensor(new_tail_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
+            filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (num_valid/test_triples, num_entities)
+            correct_scores = torch.gather(input=filtered_tail_scores, dim=1, index=tails)  # (num_valid/test_triples, 1)
+            false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
             tail_ranks = tail_ranks + 1  # ranks of correct tail entities
 
