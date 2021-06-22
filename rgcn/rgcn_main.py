@@ -14,14 +14,14 @@ class RgcnMain:
 
         self.from_pre = False  # True: continue training
         self.embed_dim = 100  # entity embedding dimension
-        self.num_bases = 64  # bases of relation matrices
+        self.num_bases = 100  # bases of relation matrices
         self.aggr = "add"  # the aggregation scheme to use in RGCN
         self.batch_size = 20480  # train batch size
         self.vt_batch_size = 500  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
         self.num_epochs = 100  # number of epochs
         self.neg_num = 32  # number of negative triples for each positive triple
-        self.valid_freq = 5  # validation frequency
+        self.valid_freq = 3  # validation frequency
 
         # self.count: {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         # self.triples: {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
@@ -97,22 +97,23 @@ class RgcnMain:
                 epoch_loss += batch_loss
             print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             if epoch % self.valid_freq == 0:
-                current_mrr = self.v_and_t("valid", valid_loader, rgcn_lp)
+                current_mrr = self.v_and_t("valid", valid_loader, rgcn_lp, epoch)
                 if highest_mrr < current_mrr:
                     highest_mrr = current_mrr
                     torch.save(rgcn_lp.state_dict(), self.model_path)
-                    print("model saved to `{}`   ".format(self.model_path))
+                    print("- model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
                 else:
                     break
         print("#### testing")
-        self.v_and_t("test", test_loader, rgcn_lp)
+        self.v_and_t("test", test_loader, rgcn_lp, 0)
         print("-----")
         print("  ")
 
     # do validation/test
     # name: in ["valid", "test"]
     # index_loader: validation/test triple index loader
-    def v_and_t(self, name: str, index_loader: DataLoader, model: RgcnLP) -> float:
+    # epoch: current epoch number
+    def v_and_t(self, name: str, index_loader: DataLoader, model: RgcnLP, epoch: int) -> float:
         ranks = torch.zeros(5, 2)  # [[h_mr, t_mr], [h_mrr, t_mrr], [h_hit1, t_hit1], [h_hit3, t_hit3], [h_hit10, t_hit10]]
         batch_count = 0
         for batch in index_loader:
@@ -124,7 +125,11 @@ class RgcnMain:
         mean_ranks = torch.mean(ranks, dim=1)  # (5)
 
         print_dic = {"valid": "validation results", "test": "testing results"}
-        print("{}  ".format(print_dic[name]))
+        if name == "valid":
+            print("- {}  at epoch `{}`".format(print_dic[name], epoch))
+        else:
+            print("- {}  ".format(print_dic[name]))
+        print("   ")
         print("|  metric  |  head  |  tail  |  mean  |  ")
         print("|  ----  |  ----  |  ----  |  ----  |  ")
         print("|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[0, 0], ranks[0, 1], mean_ranks[0]))
@@ -132,6 +137,7 @@ class RgcnMain:
         print("|  hit@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[2, 0], ranks[2, 1], mean_ranks[2]))
         print("|  hit@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[3, 0], ranks[3, 1], mean_ranks[3]))
         print("|  hit@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[4, 0], ranks[4, 1], mean_ranks[4]))
+        print("   ")
         return mean_ranks[1]  # MRR
 
     # compute the mean rank (MR), mean reciprocal rank (MRR) and hit@1, 3, 10 for the given triples
@@ -159,7 +165,7 @@ class RgcnMain:
             correct_scores = torch.gather(input=new_head_scores, dim=1, index=heads)  # (num_valid/test_triples, 1)
             false_positives = torch.nonzero(torch.BoolTensor(new_head_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             head_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
-            head_ranks = torch.clip(input=head_ranks, min=1)  # ranks of correct head entities
+            head_ranks = head_ranks + 1  # ranks of correct head entities
 
             h_mr = torch.mean(head_ranks.to(torch.float))  # mean head rank
             h_mrr = torch.mean(1. / head_ranks.to(torch.float))  # mean head reciprocal rank
@@ -172,7 +178,7 @@ class RgcnMain:
             correct_scores = torch.gather(input=new_tail_scores, dim=1, index=tails)  # (num_valid/test_triples, 1)
             false_positives = torch.nonzero(torch.BoolTensor(new_tail_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
-            tail_ranks = torch.clip(input=tail_ranks, min=1)  # ranks of correct tail entities
+            tail_ranks = tail_ranks + 1  # ranks of correct tail entities
 
             t_mr = torch.mean(tail_ranks.to(torch.float))  # mean tail rank
             t_mrr = torch.mean(1. / tail_ranks.to(torch.float))  # mean tail reciprocal rank

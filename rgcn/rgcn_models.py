@@ -46,10 +46,8 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
     # edge_type: as above, (num_edges);
     def message(self, x_j: Tensor, edge_type: Tensor = None) -> Tensor:
         assert edge_type is not None, "edge_type is not given"
-
         relation_weights = self.compute_relation_weights(edge_type)  # (num_relations, in_dimension, out_dimension)
         messages = torch.bmm(x_j.unsqueeze(1), relation_weights).squeeze(1)  # unnormalized messages, (num_edges, out_dimension)
-
         return messages
 
     # normalize and aggregate messages passed to target entities

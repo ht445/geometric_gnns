@@ -36,8 +36,14 @@ def read_data(data_path: str):
         edge_type[t_id] = int(ids[1])
         edge_index[1, t_id] = int(ids[2])
 
+    # add inverse relations
+    sources = edge_index[0, :]
+    targets = edge_index[1, :]
+    edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)
+    edge_type = torch.cat((edge_type, edge_type), dim=0)
+
     # add self-loops
-    self_loop_id = torch.LongTensor([count["relation"]])  # the id of self-loop
+    self_loop_id = torch.LongTensor([count["relation"]])  # the id of self-loops
     count["relation"] += 1
     edge_index, _ = torch_geometric.utils.add_self_loops(edge_index=edge_index, num_nodes=count["entity"])
     edge_type = torch.cat((edge_type, self_loop_id.repeat(edge_index.size()[1] - edge_type.size()[0])), dim=0)
