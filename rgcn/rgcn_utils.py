@@ -122,11 +122,11 @@ def negative_sampling(num_entities: int, num_triples: int, neg_num: int, train_t
             sampled_entity = en_samples[tmp_count]
             if sampled_position == 0:  # corrupt the head
                 while sampled_entity == current_head or sampled_entity in tr2h[(current_tail, current_relation)]:
-                    sampled_entity += 1
+                    sampled_entity = (sampled_entity + 1) % num_entities
                 neg_triples[t_id, i, :] = torch.LongTensor([sampled_entity, current_relation, current_tail])
             elif sampled_position == 1:  # corrupt the tail
                 while sampled_entity == current_tail or sampled_entity in hr2t[(current_head, current_relation)]:
-                    sampled_entity += 1
+                    sampled_entity += (sampled_entity + 1) % num_entities
                 neg_triples[t_id, i, :] = torch.LongTensor([current_head, current_relation, sampled_entity])
             tmp_count += 1
     return neg_triples

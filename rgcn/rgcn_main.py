@@ -9,18 +9,18 @@ from rgcn_utils import read_data, IndexSet, negative_sampling
 
 class RgcnMain:
     def __init__(self):
-        self.data_path = "../data/FB15K237/"
-        self.model_path = "../pretrained/FB15K237/rgcn_lp.pt"
+        self.data_path = "../data/test/"  # "../data/FB15K237/"
+        self.model_path = "../pretrained/test.pt"  # "../pretrained/FB15K237/rgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.embed_dim = 100  # entity embedding dimension
-        self.num_bases = 100  # bases of relation matrices
+        self.embed_dim = 6  # 100  # entity embedding dimension
+        self.num_bases = 2  # 50  # bases of relation matrices
         self.aggr = "add"  # the aggregation scheme to use in RGCN
-        self.batch_size = 20480  # train batch size
-        self.vt_batch_size = 500  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
+        self.batch_size = 3 # 20480  # train batch size
+        self.vt_batch_size = 2 # 500  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
-        self.num_epochs = 100  # number of epochs
-        self.neg_num = 16  # number of negative triples for each positive triple
+        self.num_epochs = 1  # 100  # number of epochs
+        self.neg_num = 2  # 32  # number of negative triples for each positive triple
         self.valid_freq = 3  # validation frequency
         self.patience = 2  # determines when to early stop
 
@@ -115,7 +115,9 @@ class RgcnMain:
                     if patience == 0:
                         break
         print("#### testing")
-        self.v_and_t("test", test_loader, rgcn_lp, 0)
+        test_model = RgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr)
+        test_model.load_state_dict(torch.load(self.model_path))
+        self.v_and_t("test", test_loader, test_model, 0)
         print("-----")
         print("  ")
 
