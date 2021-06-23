@@ -57,8 +57,9 @@ def read_data(data_path: str):
     sources = edge_index[0, :]
     targets = edge_index[1, :]
     edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)
-    edge_type = torch.cat((edge_type, edge_type + count["relation"]), dim=0)
-    count["relation"] = count["relation"] * 2
+    # edge_type = torch.cat((edge_type, edge_type + count["relation"]), dim=0)
+    # count["relation"] = count["relation"] * 2
+    edge_type = torch.cat((edge_type, edge_type), dim=0)
 
     # add self-loops
     self_loop_id = torch.LongTensor([count["relation"]])  # the id of self-loops
@@ -126,7 +127,7 @@ def negative_sampling(num_entities: int, num_triples: int, neg_num: int, train_t
                 neg_triples[t_id, i, :] = torch.LongTensor([sampled_entity, current_relation, current_tail])
             elif sampled_position == 1:  # corrupt the tail
                 while sampled_entity == current_tail or sampled_entity in hr2t[(current_head, current_relation)]:
-                    sampled_entity += (sampled_entity + 1) % num_entities
+                    sampled_entity = (sampled_entity + 1) % num_entities
                 neg_triples[t_id, i, :] = torch.LongTensor([current_head, current_relation, sampled_entity])
             tmp_count += 1
     return neg_triples
