@@ -16,11 +16,11 @@ class RgcnMain:
         self.embed_dim = 200  # entity embedding dimension
         self.num_bases = 50  # bases of relation matrices
         self.aggr = "add"  # the aggregation scheme to use in RGCN
-        self.batch_size = 20480  # train batch size
-        self.vt_batch_size = 500  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
+        self.batch_size = 10240  # train batch size
+        self.vt_batch_size = 100  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
         self.num_epochs = 100  # number of epochs
-        self.neg_num = 32  # number of negative triples for each positive triple
+        self.neg_num = 16  # number of negative triples for each positive triple
         self.valid_freq = 3  # validation frequency
         self.patience = 2  # determines when to early stop
 
