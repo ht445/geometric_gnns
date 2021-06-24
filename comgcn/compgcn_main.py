@@ -2,27 +2,29 @@ import torch
 import torch_scatter
 from torch import Tensor
 from datetime import datetime
-from rgcn_models import RgcnLP
+from comp_models import CompgcnLP
 from torch.utils.data import DataLoader
-from rgcn_utils import read_data, IndexSet, negative_sampling
+from compgcn_utils import read_data, IndexSet, negative_sampling
 
 
-class RgcnMain:
+class CompgcnMain:
     def __init__(self):
         self.data_path = "../data/FB15K237/"
-        self.model_path = "../pretrained/FB15K237/rgcn_lp.pt"
+        self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
+        self.operation = "RGCN"  # "TransE"  # the composition operation: ["TransE", "RGCN"]
         self.from_pre = False  # True: continue training
-        self.embed_dim = 200  # entity embedding dimension
+        self.embed_dim = 100  # entity embedding dimension
         self.num_bases = 50  # bases of relation matrices
-        self.aggr = "add"  # the aggregation scheme to use in RGCN
-        self.batch_size = 10240  # train batch size
-        self.vt_batch_size = 100  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
+        self.aggr = "add"  # the aggregation scheme to use in CompGCN
+        self.batch_size = 20480  # train batch size
+        self.vt_batch_size = 500 # 2000  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
         self.num_epochs = 100  # number of epochs
         self.neg_num = 16  # number of negative triples for each positive triple
         self.valid_freq = 3  # validation frequency
         self.patience = 2  # determines when to early stop
+        self.norm = 2  # norm for TransE
 
         # self.count: {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         # self.triples: {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
@@ -38,10 +40,11 @@ class RgcnMain:
         print("### Running Time: `{}`".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         print("#### configuration")
         print("- load data from `{}`".format(self.data_path))
+        print("- operation: `{}`".format(self.operation))
         print("- continue training: `{}`".format(self.from_pre))
         print("- embedding dimension: `{}`".format(self.embed_dim))
         print("- number of bases: `{}`".format(self.num_bases))
-        print("- rgcn aggregation scheme: `{}`".format(self.aggr))
+        print("- compGCN aggregation scheme: `{}`".format(self.aggr))
         print("- train batch size: `{}`".format(self.batch_size))
         print("- validation/test batch size: `{}`".format(self.vt_batch_size))
         print("- learning rate: `{}`".format(self.lr))
@@ -53,23 +56,24 @@ class RgcnMain:
         print("- number of validation triples: `{}`".format(self.count["valid"]))
         print("- number of testing triples: `{}`".format(self.count["test"]))
         print("- patience: `{}`".format(self.patience))
+        print("- norm: `{}`".format(self.norm))
 
     # model training
     def main(self):
         # instantiate the link prediction model
-        rgcn_lp = RgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr)
+        compgcn_lp = CompgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, op=self.operation)
         if self.from_pre:
-            rgcn_lp.load_state_dict(torch.load(self.model_path))
+            compgcn_lp.load_state_dict(torch.load(self.model_path))
 
         # print parameter names of the model
         param_names = []
-        for name, param in rgcn_lp.named_parameters():
+        for name, param in compgcn_lp.named_parameters():
             if param.requires_grad:
                 param_names.append(name)
         print("- model parameters: `{}`".format(param_names))
 
         # use Adam as the optimizer
-        optimizer = torch.optim.Adam(params=rgcn_lp.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr)
         # use binary cross entropy loss as the loss function
         criterion = torch.nn.BCELoss()
 
@@ -92,30 +96,30 @@ class RgcnMain:
             for batch in train_index_loader:
                 optimizer.zero_grad()
                 batch_pos_triples = torch.index_select(input=train_triples, index=batch, dim=0)  # (current_batch_size, 3)
-                pos_targets = torch.ones(batch.size()[0])  # (current_batch_size)
+                pos_targets = torch.zeros(batch.size()[0])  # (current_batch_size)
                 batch_neg_triples = torch.index_select(input=neg_triples, index=batch, dim=0).view(-1, 3)  # (current_batch_size * neg_num, 3)
-                neg_targets = torch.zeros(batch.size()[0] * self.neg_num)  # (current_batch_size * neg_num)
+                neg_targets = torch.ones(batch.size()[0] * self.neg_num)  # (current_batch_size * neg_num)
                 batch_triples = torch.cat((batch_pos_triples, batch_neg_triples), dim=0)  # (current_batch_size + current_batch_size * neg_num, 3)
                 targets = torch.cat((pos_targets, neg_targets), dim=0)  # (current_batch_size + current_batch_size * neg_num)
-                scores = rgcn_lp(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=batch_triples)  # (current_batch_size + current_batch_size * neg_num)
+                scores = compgcn_lp(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, masks=self.graph.masks, triple_batch=batch_triples)  # (current_batch_size + current_batch_size * neg_num)
                 batch_loss = criterion(input=scores, target=targets)
                 batch_loss.backward()
                 optimizer.step()
                 epoch_loss += batch_loss
             print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             if epoch % self.valid_freq == 0:
-                current_mrr = self.v_and_t("valid", valid_loader, rgcn_lp, epoch)
+                current_mrr = self.v_and_t("valid", valid_loader, compgcn_lp, epoch)
                 if highest_mrr < current_mrr:
                     patience = self.patience
                     highest_mrr = current_mrr
-                    torch.save(rgcn_lp.state_dict(), self.model_path)
+                    torch.save(compgcn_lp.state_dict(), self.model_path)
                     print("- model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
                 else:
                     patience -= 1
                     if patience == 0:
                         break
         print("#### testing")
-        test_model = RgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr)
+        test_model = CompgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, op=self.operation)
         test_model.load_state_dict(torch.load(self.model_path))
         self.v_and_t("test", test_loader, test_model, 0)
         print("-----")
@@ -125,7 +129,7 @@ class RgcnMain:
     # name: in ["valid", "test"]
     # index_loader: validation/test triple index loader
     # epoch: current epoch number
-    def v_and_t(self, name: str, index_loader: DataLoader, model: RgcnLP, epoch: int) -> float:
+    def v_and_t(self, name: str, index_loader: DataLoader, model: CompgcnLP, epoch: int) -> float:
         ranks = torch.zeros(5, 2)  # [[h_mr, t_mr], [h_mrr, t_mrr], [h_hit1, t_hit1], [h_hit3, t_hit3], [h_hit10, t_hit10]]
         batch_count = 0
         for batch in index_loader:
@@ -158,7 +162,7 @@ class RgcnMain:
     # model: the link prediction model
     # triples: the triples for validation/test, (num_valid/test_triples, 3), num_valid/test_triples = vt_batch_size mostly
     # correct_heads, correct_tails: LongTensor(num_valid_triples, num_entities)
-    def ranking(self, model: RgcnLP, triples: Tensor, correct_heads: Tensor, correct_tails: Tensor) -> Tensor:
+    def ranking(self, model: CompgcnLP, triples: Tensor, correct_heads: Tensor, correct_tails: Tensor) -> Tensor:
         # candidate entities for each validation/testing triple
         entities = torch.arange(self.count["entity"]).repeat(triples.size()[0], 1).unsqueeze(2)  # (num_valid/test_triples, num_entities, 1)
 
@@ -175,11 +179,11 @@ class RgcnMain:
         # evaluate the model
         model.eval()
         with torch.no_grad():
-            new_head_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_head_triples)  # (num_valid/test_triples * num_entities)
+            new_head_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, masks=self.graph.masks, triple_batch=new_head_triples)  # (num_valid/test_triples * num_entities)
             new_head_scores = new_head_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
             filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (num_valid/test_triples, num_entities)
             correct_scores = torch.gather(input=filtered_head_scores, dim=1, index=heads)  # (num_valid/test_triples, 1)
-            false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
+            false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores < correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             head_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
             head_ranks = head_ranks + 1  # ranks of correct head entities
 
@@ -189,11 +193,11 @@ class RgcnMain:
             h_hit3 = torch.nonzero(torch.BoolTensor(head_ranks <= 3)).size()[0] / head_ranks.size()[0]  # head hit@3
             h_hit10 = torch.nonzero(torch.BoolTensor(head_ranks <= 10)).size()[0] / head_ranks.size()[0]  # head hit@10
 
-            new_tail_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_tail_triples)  # (num_valid/test_triples * num_entities)
+            new_tail_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, masks=self.graph.masks, triple_batch=new_tail_triples)  # (num_valid/test_triples * num_entities)
             new_tail_scores = new_tail_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
             filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (num_valid/test_triples, num_entities)
             correct_scores = torch.gather(input=filtered_tail_scores, dim=1, index=tails)  # (num_valid/test_triples, 1)
-            false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
+            false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores < correct_scores), as_tuple=True)  # indices of the entities having higher scores than correct ones
             tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives[0].size()[0]).to(torch.long), index=false_positives[0], dim=0)  # number of false positives for each valid/test triple, (num_valid/test_triples)
             tail_ranks = tail_ranks + 1  # ranks of correct tail entities
 
@@ -209,6 +213,6 @@ class RgcnMain:
 
 # do link prediction
 if __name__ == "__main__":
-    rgcn_main = RgcnMain()
-    rgcn_main.main()
+    compgcn_main = CompgcnMain()
+    compgcn_main.main()
 

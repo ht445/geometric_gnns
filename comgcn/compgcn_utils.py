@@ -52,6 +52,7 @@ def read_data(data_path: str):
         edge_index[0, t_id] = int(ids[0])
         edge_type[t_id] = int(ids[1])
         edge_index[1, t_id] = int(ids[2])
+    masks = torch.LongTensor([0]).repeat(count["train"])  # (num_train_triples)
 
     # add inverse relations
     sources = edge_index[0, :]
@@ -59,14 +60,18 @@ def read_data(data_path: str):
     edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)
     edge_type = torch.cat((edge_type, edge_type + count["relation"]), dim=0)
     count["relation"] = count["relation"] * 2
+    masks = torch.cat((masks, torch.LongTensor([1]).repeat(count["train"])), dim=0)  # (num_train_triples * 2)
 
     # add self-loops
-    self_loop_id = torch.LongTensor([count["relation"]])  # the id of self-loops
-    count["relation"] += 1
     edge_index, _ = torch_geometric.utils.add_self_loops(edge_index=edge_index, num_nodes=count["entity"])
-    edge_type = torch.cat((edge_type, self_loop_id.repeat(edge_index.size()[1] - edge_type.size()[0])), dim=0)
+    num_self_loops = edge_index.size()[1] - edge_type.size()[0]
+    self_loop_ids = torch.LongTensor([count["relation"]]).repeat(num_self_loops)  # the ids of self-loops
+    edge_type = torch.cat((edge_type, self_loop_ids), dim=0)
+    count["relation"] += 1
+    masks = torch.cat((masks, torch.LongTensor([2]).repeat(num_self_loops)), dim=0)  # (num_train_triples * 2 + num_self_loops)
+
     # construct a pytorch geometric graph for the training graph
-    graph = Data(edge_index=edge_index, edge_type=edge_type)
+    graph = Data(edge_index=edge_index, edge_type=edge_type, masks=masks)
 
     # mark correct heads and tails in the tensors that would be used to filter out their scores
     correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]), "test": torch.LongTensor(count["test"], count["entity"])}

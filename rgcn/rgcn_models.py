@@ -73,6 +73,7 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
 
 
 # a link prediction network based on RGCN and DistMult *
+# here we simply use the relation weights of RGCN as the relation matrices of DistMult (which violates some requirements of DistMult)
 # *. Yang, Bishan, et al. "Embedding entities and relations for learning and inference in knowledge bases." arXiv preprint arXiv:1412.6575 (2014).
 class RgcnLP(torch.nn.Module):
     def __init__(self, in_dimension: int, out_dimension: int, num_entities: int, num_relations: int, num_bases: int, aggr: str):
@@ -83,7 +84,7 @@ class RgcnLP(torch.nn.Module):
 
         self.rgcn = RGCN(in_dimension, out_dimension, num_relations, num_bases, aggr)  # the rgcn encoder
 
-    # update entity embeddings via RGCN and compute binary cross entropy loss via DistMult
+    # update entity embeddings via RGCN and compute scores via a DistMult-like function
     # triple_batch: positive and negative triples in the form of (head_entity_id, relation_id, tail_entity_id), (num_triples, 3);
     def forward(self, edge_index: Tensor, edge_type: Tensor, triple_batch: Tensor):
         # update entity embeddings via rgcn
@@ -102,7 +103,7 @@ class RgcnLP(torch.nn.Module):
 
 
 def test_rgcn(x, edge_index, edge_type):
-    print("-- checking rgcn --")
+    print("-- checking RGCN")
     print("input x:")
     print(x)
     rgcn = RGCN(in_dimension=6, out_dimension=5, num_relations=3, num_bases=2, aggr="add")
@@ -113,7 +114,7 @@ def test_rgcn(x, edge_index, edge_type):
 
 
 def test_rgcnlp(edge_index, edge_type, triple_batch):
-    print("-- checking rgcn_lp")
+    print("-- checking RgcnLP")
     rgcn_lp = RgcnLP(in_dimension=6, out_dimension=6, num_entities=3, num_relations=3, num_bases=2, aggr="add")
     loss = rgcn_lp(edge_index, edge_type, triple_batch)
     print("computed loss")
