@@ -31,6 +31,8 @@ Please refer to [Installation](https://pytorch-geometric.readthedocs.io/en/lates
 ----
 ### Experimental Results
 
+- Note: the following only reports in-progress results; model architectures and hyperparameters are not well set. 
+
 - RGCN ([corresponding commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/90bc1f39a6600498e3adc557dca9d51e16abbc15))
 
 |  metric  |  head  |  tail  |  mean  |  
@@ -41,14 +43,14 @@ Please refer to [Installation](https://pytorch-geometric.readthedocs.io/en/lates
 |  hit@3  |  `0.11515237390995026`  |  `0.2234063744544983`  |  `0.16927936673164368`  |  
 |  hit@10  |  `0.24000363051891327`  |  `0.396608829498291`  |  `0.31830623745918274`  |  
 
+- CompGCN ([corresponding commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079))
 
-- Note: the link prediction experiment is just to showcase the application of GCNs. Neither the model architecture nor the parameter setting was fine-tuned. Therefore, the above results may look inferior. 
+|  metric  |  head  |  tail  |  mean  |  
+|  ----  |  ----  |  ----  |  ----  |  
+|  mean rank (MR)  |  `673.3828735351562`  |  `2129.835693359375`  |  `1401.6092529296875`  |  
+|  mean reciprocal rank (MRR)  |  `0.12702743709087372`  |  `0.10114094614982605`  |  `0.11408419162034988`  |  
+|  hit@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
+|  hit@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
+|  hit@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |  
 
 ----
-
-<img src="https://www.seekpng.com/png/detail/66-668670_board-under-construction-sign.png" alt="Board Under Construction Sign@seekpng.com">
-
-----
-### Contact
-
-https://www.ifi.uzh.ch/en/ddis/people/ruijie.html
