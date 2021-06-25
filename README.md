@@ -1,14 +1,16 @@
 ## Graph Convolutional Networks-based Link Prediction
 
-Two popular Graph Convolutional Networks (GCN) are implemented:
+Two popular Graph Convolutional Networks (GCNs) are implemented:
 
 - Relational Graph Convolutional Network (RGCN), from [Modeling Relational Data with Graph Convolutional Networks](https://arxiv.org/abs/1703.06103),
 
 - Composition-based Graph Convolutional Network (CompGCN), from [Composition-based Multi-Relational Graph Convolutional Networks](https://openreview.net/pdf?id=BylA_C4tPr).
 
-They have been evaluated in link prediction experiments. More details are to be given.
+They have been evaluated in link prediction experiments.
 
 They are implemented based on [Pytorch Geometric](https://github.com/rusty1s/pytorch_geometric). With self-explanatory comments, the code is beginner-friendly. But if you are not familiar with Pytorch Geometric, checking out these [Colab Notebooks](https://pytorch-geometric.readthedocs.io/en/latest/notes/colabs.html) could be a good start. 
+
+This work is still in progress, so I would be very grateful if you can find any bug or give me any feedback. Cheers!
 
 ----
 ### Environment
