@@ -21,7 +21,7 @@
 - norm: `2`
 - CompRGCN instantiated
 - model parameters: `['entity_embeds', 'compgcn.bases', 'compgcn.coefficients', 'compgcn.weights', 'compgcn.relation_r_weight', 'compgcn.relation_l_weight']`
-#### training
+
 -----
 ### Running Time: `2021-06-24 22:33:48`
 #### configuration
