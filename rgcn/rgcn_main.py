@@ -16,13 +16,18 @@ class RgcnMain:
         self.embed_dim = 200  # entity embedding dimension
         self.num_bases = 50  # bases of relation matrices
         self.aggr = "add"  # the aggregation scheme to use in RGCN
-        self.batch_size = 10240  # train batch size
+        self.num_subgraphs = 1
+        self.subgraph_batch_size = 1
+        self.batch_size = 32  # train batch size
         self.vt_batch_size = 100  # validation/test batch size, please set it according to your memory size (current cost around 300GB)
         self.lr = 0.01  # learning rate
+        self.dropout = 0.2
         self.num_epochs = 100  # number of epochs
-        self.neg_num = 16  # number of negative triples for each positive triple
-        self.valid_freq = 3  # validation frequency
+        self.neg_num = 8  # number of negative triples for each positive triple
+        self.valid_freq = 5  # validation frequency
         self.patience = 2  # determines when to early stop
+        self.gpu = "cuda:2"
+        self.device = torch.device("cpu")
 
         # self.count: {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         # self.triples: {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
@@ -56,10 +61,13 @@ class RgcnMain:
 
     # model training
     def main(self):
+        if torch.cuda.is_available():
+            self.device = torch.device(self.gpu)
         # instantiate the link prediction model
-        rgcn_lp = RgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr)
+        rgcn_lp = RgcnLP(edge_index=self.graph.edge_index, edge_attr=torch.unsqueeze(self.graph.edge_type, 1), num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr="add", dropout=self.dropout, num_subgraphs=self.num_subgraphs, subgraph_batch_size=self.subgraph_batch_size, device=self.device)
         if self.from_pre:
             rgcn_lp.load_state_dict(torch.load(self.model_path))
+        rgcn_lp.to(self.device)
 
         # print parameter names of the model
         param_names = []
@@ -89,7 +97,7 @@ class RgcnMain:
             epoch_loss = 0.
             # sample self.neg_num negative triples for each training triple
             neg_triples = negative_sampling(num_entities=self.count["entity"], num_triples=self.count["train"], neg_num=self.neg_num, train_triples=train_triples, hr2t=self.hr2t, tr2h=self.tr2h)  # (num_train_triples, neg_num, 3)
-            for batch in train_index_loader:
+            for step, batch in enumerate(train_index_loader):
                 optimizer.zero_grad()
                 batch_pos_triples = torch.index_select(input=train_triples, index=batch, dim=0)  # (current_batch_size, 3)
                 pos_targets = torch.ones(batch.size()[0])  # (current_batch_size)
@@ -97,13 +105,14 @@ class RgcnMain:
                 neg_targets = torch.zeros(batch.size()[0] * self.neg_num)  # (current_batch_size * neg_num)
                 batch_triples = torch.cat((batch_pos_triples, batch_neg_triples), dim=0)  # (current_batch_size + current_batch_size * neg_num, 3)
                 targets = torch.cat((pos_targets, neg_targets), dim=0)  # (current_batch_size + current_batch_size * neg_num)
-                scores = rgcn_lp(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=batch_triples)  # (current_batch_size + current_batch_size * neg_num)
+                scores = rgcn_lp(triples=batch_triples.to(self.device))  # (current_batch_size + current_batch_size * neg_num)
                 batch_loss = criterion(input=scores, target=targets)
-                batch_loss.backward()
+                batch_loss.backward(retain_graph=True)
                 optimizer.step()
                 epoch_loss += batch_loss
+                print("- step `{}`, time `{}`  ".format(batch, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            if epoch % self.valid_freq == 0:
+            if epoch % self.valid_freq == 0 and False:
                 current_mrr = self.v_and_t("valid", valid_loader, rgcn_lp, epoch)
                 if highest_mrr < current_mrr:
                     patience = self.patience
@@ -115,7 +124,7 @@ class RgcnMain:
                     if patience == 0:
                         break
         print("#### testing")
-        test_model = RgcnLP(in_dimension=self.embed_dim, out_dimension=self.embed_dim, num_entities=self.count["entity"], num_relations=self.count["relation"], num_bases=self.num_bases, aggr=self.aggr)
+        test_model = RgcnLP(edge_index=self.graph.edge_index, edge_attr=torch.unsqueeze(self.graph.edge_type, 1), num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr="add", dropout=self.dropout, num_subgraphs=self.num_subgraphs, subgraph_batch_size=self.subgraph_batch_size, device=self.device)
         test_model.load_state_dict(torch.load(self.model_path))
         self.v_and_t("test", test_loader, test_model, 0)
         print("-----")
@@ -175,7 +184,7 @@ class RgcnMain:
         # evaluate the model
         model.eval()
         with torch.no_grad():
-            new_head_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_head_triples)  # (num_valid/test_triples * num_entities)
+            new_head_scores = model(triples=new_head_triples)  # (num_valid/test_triples * num_entities)
             new_head_scores = new_head_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
             filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (num_valid/test_triples, num_entities)
             correct_scores = torch.gather(input=filtered_head_scores, dim=1, index=heads)  # (num_valid/test_triples, 1)
@@ -189,7 +198,7 @@ class RgcnMain:
             h_hit3 = torch.nonzero(torch.BoolTensor(head_ranks <= 3)).size()[0] / head_ranks.size()[0]  # head hit@3
             h_hit10 = torch.nonzero(torch.BoolTensor(head_ranks <= 10)).size()[0] / head_ranks.size()[0]  # head hit@10
 
-            new_tail_scores = model(edge_index=self.graph.edge_index, edge_type=self.graph.edge_type, triple_batch=new_tail_triples)  # (num_valid/test_triples * num_entities)
+            new_tail_scores = model(triples=new_tail_triples)  # (num_valid/test_triples * num_entities)
             new_tail_scores = new_tail_scores.view(triples.size()[0], self.count["entity"])  # (num_valid/test_triples, num_entities)
             filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (num_valid/test_triples, num_entities)
             correct_scores = torch.gather(input=filtered_tail_scores, dim=1, index=tails)  # (num_valid/test_triples, 1)
