@@ -1,11 +1,9 @@
 import torch
-import torch_geometric
-from torch import Tensor
 from torch.utils.data import Dataset
-from torch_geometric.data import Data
+from torch import FloatTensor, LongTensor
 
 
-def read_data(data_path: str):
+def read_data(data_path: str) -> []:
     # get the number of entities, relations, and training/validation/testing triples
     count = {}
     for name in ["entity", "relation", "train", "valid", "test"]:
@@ -16,7 +14,7 @@ def read_data(data_path: str):
     # store training/validation/testing triples in tensors
     triples = {}
     for name in ["train", "valid", "test"]:
-        triples[name] = torch.LongTensor(count[name], 3)  # (num_train/valid/test_triples, 3)
+        triples[name] = torch.LongTensor(count[name], 3)  # size: (num_train/valid/test_triples, 3)
         tmp_count = 0
         with open(data_path + name + "2id.txt") as f:
             f.readline()
@@ -44,38 +42,17 @@ def read_data(data_path: str):
             tr2h[(tail, relation)].append(head)
             line = f.readline()
 
-    # convert training triples into edge_index and edge_type
-    edge_index = torch.LongTensor(2, count["train"])  # (2, num_train_triples)
-    edge_type = torch.LongTensor(count["train"])  # (num_train_triples)
-    for t_id in range(count["train"]):
-        ids = triples["train"][t_id, :]
-        edge_index[0, t_id] = int(ids[0])
-        edge_type[t_id] = int(ids[1])
-        edge_index[1, t_id] = int(ids[2])
-
-    # add inverse relations
-    sources = edge_index[0, :]
-    targets = edge_index[1, :]
-    edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)
-    edge_type = torch.cat((edge_type, edge_type + count["relation"]), dim=0)
-    count["relation"] = count["relation"] * 2
-
-    # add self-loops
-    self_loop_id = torch.LongTensor([count["relation"]])  # the id of self-loops
-    count["relation"] += 1
-    edge_index, _ = torch_geometric.utils.add_self_loops(edge_index=edge_index, num_nodes=count["entity"])
-    edge_type = torch.cat((edge_type, self_loop_id.repeat(edge_index.size()[1] - edge_type.size()[0])), dim=0)
-    # construct a pytorch geometric graph for the training graph
-    graph = Data(edge_index=edge_index, edge_type=edge_type)
-
-    # mark correct heads and tails in the tensors that would be used to filter out their scores
-    correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]), "test": torch.LongTensor(count["test"], count["entity"])}
-    correct_tails = {"valid": torch.LongTensor(count["valid"], count["entity"]), "test": torch.LongTensor(count["test"], count["entity"])}
+    # mask correct heads and tails in tensors that would be used to compute filtered results
+    correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]),
+                     "test": torch.LongTensor(count["test"], count["entity"])}
+    correct_tails = {"valid": torch.LongTensor(count["valid"], count["entity"]),
+                     "test": torch.LongTensor(count["test"], count["entity"])}
     for name in ["valid", "test"]:
-        current_triples = triples[name]  # (num_valid/test_triples, 3)
+        current_triples = triples[name]  # size: (num_valid/test_triples, 3)
         for i in range(count[name]):
-            current_triple = current_triples[i, :]  # (3)
-            current_head, current_relation, current_tail = int(current_triple[0]), int(current_triple[1]), int(current_triple[2])
+            current_triple = current_triples[i, :]  # size: (3)
+            current_head, current_relation, current_tail = int(current_triple[0]), int(current_triple[1]), int(
+                current_triple[2])
             correct_heads[name][i, :] = torch.arange(count["entity"])
             if (current_tail, current_relation) in tr2h:
                 for correct_head in tr2h[(current_tail, current_relation)]:
@@ -85,7 +62,42 @@ def read_data(data_path: str):
                 for correct_tail in hr2t[(current_head, current_relation)]:
                     correct_tails[name][i, correct_tail] = current_tail
 
-    return count, triples, graph, hr2t, tr2h, correct_heads, correct_tails
+    return count, triples, hr2t, tr2h, correct_heads, correct_tails
+
+
+def train_triple_pre(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: LongTensor, tail_ids: LongTensor, hr2t: dict, tr2h: dict, neg_num: int) -> [LongTensor]:
+    # prepare positive triples
+    num_ori_triples = int((head_ids.size(0) - ent_ids.size(0)) / 2)
+    pos_triples = torch.LongTensor(num_ori_triples, 3)
+    triple_id = 0
+    for edge_id in range(head_ids.size(0)):
+        h_id = int(ent_ids[head_ids[edge_id]])
+        r_id = int(rel_ids[edge_id])
+        t_id = int(ent_ids[tail_ids[edge_id]])
+        if (h_id, r_id) in hr2t:
+            if t_id in hr2t[(h_id, r_id)]:
+                pos_triples[triple_id] = torch.LongTensor([head_ids[edge_id], r_id, tail_ids[edge_id]])
+                triple_id += 1
+    # prepare negative triples
+    neg_triples = torch.LongTensor(num_ori_triples * neg_num, 3)
+    h_or_ts = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=2), replacement=True, num_samples=num_ori_triples * neg_num))  # if 0, corrupt the head; if 1, corrupt the tail;
+    corr_ents = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=ent_ids.size(0)), replacement=True, num_samples=num_ori_triples * neg_num))  # sampled corrupt entities
+    for triple_id in range(num_ori_triples):
+        h_id = int(pos_triples[triple_id][0])
+        r_id = int(pos_triples[triple_id][1])
+        t_id = int(pos_triples[triple_id][2])
+        for i in range(neg_num):
+            sampled_position = int(h_or_ts[triple_id * neg_num + i])
+            sampled_entity = int(corr_ents[triple_id * neg_num + i])
+            if sampled_position == 0:  # corrupt the head
+                while sampled_entity == h_id or int(ent_ids[sampled_entity]) in tr2h[(int(ent_ids[t_id]), r_id)]:
+                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
+                neg_triples[triple_id * neg_num + i, :] = torch.LongTensor([sampled_entity, r_id, t_id])
+            elif sampled_position == 1:  # corrupt the tail
+                while sampled_entity == t_id or int(ent_ids[sampled_entity]) in hr2t[(int(ent_ids[h_id]), r_id)]:
+                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
+                neg_triples[triple_id * neg_num + i, :] = torch.LongTensor([h_id, r_id, sampled_entity])
+    return pos_triples, neg_triples
 
 
 class IndexSet(Dataset):
@@ -99,35 +111,3 @@ class IndexSet(Dataset):
 
     def __getitem__(self, item):
         return self.index_list[item]
-
-
-# num_entities: number of entities
-# num_triples: number of training triples
-# neg_num: number of negative triples for each training triple
-# train_triples: LongTensor(num_train_triples, 3)
-# hr2t: {(head_entity_id, relation_id): [tail_entity_ids, ...]}
-# tr2h: {(tail_entity_id, relation_id): [head_entity_ids, ...]}
-def negative_sampling(num_entities: int, num_triples: int, neg_num: int, train_triples: Tensor, hr2t: dict, tr2h: dict) -> Tensor:
-    neg_triples = torch.LongTensor(num_triples, neg_num, 3)
-    head_or_tail_sampler = torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=2), replacement=True, num_samples=num_triples * neg_num)  # if 0, corrupt head; if 1, corrupt tail;
-    corrupt_entity_sampler = torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=num_entities), replacement=True, num_samples=num_triples * neg_num)  # sampled corrupt entities
-    ht_samples = list(head_or_tail_sampler)  # int list, len(num_triples * neg_num)
-    en_samples = list(corrupt_entity_sampler)  # int list, len(num_triples * neg_num)
-    tmp_count = 0
-    for t_id in range(num_triples):
-        current_triple = train_triples[t_id, :]  # a positive triple, LongTensor(3)
-        current_head, current_relation, current_tail = int(current_triple[0]), int(current_triple[1]), int(current_triple[2])
-        for i in range(neg_num):
-            sampled_position = ht_samples[tmp_count]
-            sampled_entity = en_samples[tmp_count]
-            if sampled_position == 0:  # corrupt the head
-                while sampled_entity == current_head or sampled_entity in tr2h[(current_tail, current_relation)]:
-                    sampled_entity = (sampled_entity + 1) % num_entities
-                neg_triples[t_id, i, :] = torch.LongTensor([sampled_entity, current_relation, current_tail])
-            elif sampled_position == 1:  # corrupt the tail
-                while sampled_entity == current_tail or sampled_entity in hr2t[(current_head, current_relation)]:
-                    sampled_entity = (sampled_entity + 1) % num_entities
-                neg_triples[t_id, i, :] = torch.LongTensor([current_head, current_relation, sampled_entity])
-            tmp_count += 1
-    return neg_triples
-
