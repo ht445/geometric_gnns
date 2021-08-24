@@ -35,9 +35,9 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 | file | first line | other lines |
 | ---- | ---- | ---- |
-| `entity2id.txt` | number of entities: `14,541` | `entity_name + '\t' + entity_id` |
-| `relation2id.txt` | number of relations: `237` | `relation_name + '\t' + relation_id` |
-| `train2id.txt`, `valid2id.txt`, `test2id.txt` | number of training, validation, and testing triples: `272,115`, `17,535`, `20,466` | `head_entity_id + ' ' + tail_entity_id + ' ' + relation_id` |
+| `entity2id.txt` | number of entities: 14,541 | `entity_name + '\t' + entity_id` |
+| `relation2id.txt` | number of relations: 237 | `relation_name + '\t' + relation_id` |
+| `train2id.txt`, `valid2id.txt`, `test2id.txt` | number of training, validation, and testing triples: 272,115, 17,535, 20,466 | `head_entity_id + ' ' + tail_entity_id + ' ' + relation_id` |
 
 - Performance reported in the papers
 
@@ -50,7 +50,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 - Note: the following only reports in-progress results; model architectures and hyperparameters are not well set. 
 
-- RGCN ([corresponding commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/90bc1f39a6600498e3adc557dca9d51e16abbc15))
+- RGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/90bc1f39a6600498e3adc557dca9d51e16abbc15))
 
 |  metric  |  head  |  tail  |  mean  |  
 |  ----  |  ----  |  ----  |  ----  |  
@@ -60,7 +60,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  hit@3  |  `0.11515237390995026`  |  `0.2234063744544983`  |  `0.16927936673164368`  |  
 |  hit@10  |  `0.24000363051891327`  |  `0.396608829498291`  |  `0.31830623745918274`  |  
 
-- CompGCN ([corresponding commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079))
+- CompGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079))
 
 |  metric  |  head  |  tail  |  mean  |  
 |  ----  |  ----  |  ----  |  ----  |  
@@ -68,16 +68,4 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  mean reciprocal rank (MRR)  |  `0.12702743709087372`  |  `0.10114094614982605`  |  `0.11408419162034988`  |  
 |  hit@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
 |  hit@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
-|  hit@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |  
-
-- CompGCN + RGCN ([corresponding commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/67e91668e2c3f8a36a736bc924799a1e5cf5a8e8))
-   
-|  metric  |  head  |  tail  |  mean  |  
-|  ----  |  ----  |  ----  |  ----  |  
-|  mean rank (MR)  |  `358.2768859863281`  |  `185.40789794921875`  |  `271.8424072265625`  |  
-|  mean reciprocal rank (MRR)  |  `0.09944625943899155`  |  `0.23323273658752441`  |  `0.16633950173854828`  |  
-|  hit@1  |  `0.04600272700190544`  |  `0.14427782595157623`  |  `0.09514027833938599`  |  
-|  hit@3  |  `0.09846094995737076`  |  `0.25662872195243835`  |  `0.17754483222961426`  |  
-|  hit@10  |  `0.20743079483509064`  |  `0.41294726729393005`  |  `0.31018903851509094`  |  
-   
-----
+|  hit@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |
