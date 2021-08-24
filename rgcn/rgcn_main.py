@@ -15,18 +15,18 @@ class RgcnMain:
 
         self.from_pre = False  # True: continue training
         self.embed_dim = 100  # entity embedding dimension
-        self.num_bases = 20  # number of bases for relation matrices in RGCN
+        self.num_bases = 64  # number of bases for relation matrices in RGCN
         self.aggr = "add"  # aggregation scheme to use in RGCN, "add" | "mean" | "max"
         self.num_subgraphs = 20  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
         self.subgraph_batch_size = 2  # number of subgraphs in each batch
-        self.vt_batch_size = 100  # validation/test batch size; please set it according to your CPU memory (current cost around 300GB)
+        self.vt_batch_size = 200  # validation/test batch size; please set it according to your CPU memory (200 - about 164)
         self.lr = 0.01  # learning rate
         self.dropout = 0.2  # dropout rate
         self.num_epochs = 100  # number of training epochs
         self.neg_num = 1  # number of negative triples for each positive triple
         self.valid_freq = 2  # do validation every x training epochs
-        self.patience = 2  # stop training when the validation performance does not improve for x consecutive times
-        self.gpu = "cuda:2"  # the device to use, "cpu" | "cuda:x"
+        self.patience = 5  # stop training when the validation performance does not improve for x consecutive times
+        self.gpu = "cuda:3"  # the device to use, "cpu" | "cuda:x"
         if torch.cuda.is_available():
             self.device = torch.device(self.gpu)
         else:
@@ -63,6 +63,7 @@ class RgcnMain:
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
+        print("- device: `{}`".format(self.device))
 
 
     def data_pre(self):
@@ -143,9 +144,12 @@ class RgcnMain:
                 # print("number of entities: {}".format(ent_ids.size()[0]))
                 # print("number of relations: {}".format(batch_rel_ids.size()[0]))
                 # print("number of edges: {}".format(cluster.edge_index.size()[1]))
-                x = rgcn_lp.encode(ent_ids=ent_ids.to(self.device), edge_index=cluster.edge_index.to(self.device), edge_type=batch_rel_ids.to(self.device))
+                x = rgcn_lp.encode(ent_ids=ent_ids.to(self.device), edge_index=cluster.edge_index.to(self.device),
+                                   edge_type=batch_rel_ids.to(self.device))
 
-                pos_triples, neg_triples = train_triple_pre(ent_ids=ent_ids, head_ids=cluster.edge_index[0, :], rel_ids=batch_rel_ids, tail_ids=cluster.edge_index[1, :], hr2t=self.hr2t, tr2h=self.tr2h, neg_num=self.neg_num)
+                pos_triples, neg_triples = train_triple_pre(ent_ids=ent_ids, head_ids=cluster.edge_index[0, :],
+                                                            rel_ids=batch_rel_ids, tail_ids=cluster.edge_index[1, :],
+                                                            hr2t=self.hr2t, tr2h=self.tr2h, neg_num=self.neg_num)
                 train_triples = torch.cat((pos_triples, neg_triples), dim=0)
                 scores = rgcn_lp.decode(x=x, train_triples=train_triples.to(self.device))
 
@@ -160,7 +164,7 @@ class RgcnMain:
                 # print("- step `{}`, time `{}`  ".format(step, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
-            if epoch % self.valid_freq == 0 and False:
+            if epoch % self.valid_freq == 0:
                 valid_rgcn_lp.load_state_dict(rgcn_lp.state_dict())
                 current_mrr = self.v_and_t("valid", valid_loader, valid_rgcn_lp, epoch)
                 if highest_mrr < current_mrr:
