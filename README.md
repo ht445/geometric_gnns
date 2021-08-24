@@ -29,13 +29,22 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 - Detailed requirements: [environment.yml](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/environment.yml)
 
-## Dataset - FB15K237
+## Dataset
+
+- FB15K237
 
 | file | first line | other lines |
 | ---- | ---- | ---- |
 | `entity2id.txt` | number of entities: `14,541` | `entity_name + '\t' + entity_id` |
 | `relation2id.txt` | number of relations: `237` | `relation_name + '\t' + relation_id` |
 | `train2id.txt`, `valid2id.txt`, `test2id.txt` | number of training, validation, and testing triples: `272,115`, `17,535`, `20,466` | `head_entity_id + ' ' + tail_entity_id + ' ' + relation_id` |
+
+- Performance reported in the papers
+
+| Model | MRR | MR | Hit@1 | Hit@3 | Hit@10 |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| RGCN | 0.248 | - | 0.153 | 0.258 | 0.414 | 
+| CompGCN | 0.355 | 197 | 0.535 | 0.390 | 0.264 |
 
 ## Experimental Results
 
