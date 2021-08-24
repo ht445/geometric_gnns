@@ -17,16 +17,17 @@ class RgcnMain:
         self.embed_dim = 100  # entity embedding dimension
         self.num_bases = 64  # number of bases for relation matrices in RGCN
         self.aggr = "add"  # aggregation scheme to use in RGCN, "add" | "mean" | "max"
-        self.num_subgraphs = 20  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
-        self.subgraph_batch_size = 2  # number of subgraphs in each batch
+        self.num_subgraphs = 1  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
+        self.subgraph_batch_size = 1  # number of subgraphs in each batch
+
         self.vt_batch_size = 200  # validation/test batch size; please set it according to your CPU memory (200 - about 164)
         self.lr = 0.01  # learning rate
         self.dropout = 0.2  # dropout rate
         self.num_epochs = 100  # number of training epochs
         self.neg_num = 1  # number of negative triples for each positive triple
-        self.valid_freq = 2  # do validation every x training epochs
+        self.valid_freq = 5  # do validation every x training epochs
         self.patience = 5  # stop training when the validation performance does not improve for x consecutive times
-        self.gpu = "cuda:3"  # the device to use, "cpu" | "cuda:x"
+        self.gpu = "cpu"  # the device to use, "cpu" | "cuda:x"
         if torch.cuda.is_available():
             self.device = torch.device(self.gpu)
         else:
@@ -119,7 +120,7 @@ class RgcnMain:
         for name, param in rgcn_lp.named_parameters():
             if param.requires_grad:
                 param_names.append(name)
-        print("- model parameters: `{}`".format(param_names))
+        print("- model parameters: `{}`  ".format(param_names))
 
         # use Adam as the optimizer
         optimizer = torch.optim.Adam(params=rgcn_lp.parameters(), lr=self.lr)
@@ -141,9 +142,10 @@ class RgcnMain:
 
                 ent_ids = cluster.x.squeeze(1)  # size: (num_entities_in_the_current_batch)
                 batch_rel_ids = cluster.edge_attr.squeeze(1)  # size: (num_batch_triples)
-                # print("number of entities: {}".format(ent_ids.size()[0]))
-                # print("number of relations: {}".format(batch_rel_ids.size()[0]))
-                # print("number of edges: {}".format(cluster.edge_index.size()[1]))
+
+                print("step `{}`, time `{}`   ".format(step, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                print("number of entities: {}, relations: {}, edges: {}   ".format(ent_ids.size()[0], batch_rel_ids.size()[0], cluster.edge_index.size()[1]))
+
                 x = rgcn_lp.encode(ent_ids=ent_ids.to(self.device), edge_index=cluster.edge_index.to(self.device),
                                    edge_type=batch_rel_ids.to(self.device))
 
@@ -161,7 +163,6 @@ class RgcnMain:
                 batch_loss.backward()
                 optimizer.step()
                 epoch_loss += batch_loss
-                # print("- step `{}`, time `{}`  ".format(step, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
             if epoch % self.valid_freq == 0:

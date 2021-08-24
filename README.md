@@ -1,28 +1,35 @@
-## Graph Convolutional Networks-based Link Prediction
+# Graph Convolutional Networks-based Link Prediction
+
+## Overview
 
 Two popular Graph Convolutional Networks (GCNs) are implemented:
 
-- Relational Graph Convolutional Network (RGCN), from [Modeling Relational Data with Graph Convolutional Networks](https://arxiv.org/abs/1703.06103),
+- [Relational Graph Convolutional Networks (RGCNs)](https://arxiv.org/abs/1703.06103)
 
-- Composition-based Graph Convolutional Network (CompGCN), from [Composition-based Multi-Relational Graph Convolutional Networks](https://openreview.net/pdf?id=BylA_C4tPr).
+> <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/rgcn.png" alt="RGCN Arch" width="40%"> </p>
+> Schlichtkrull, Michael, et al. "Modeling relational data with graph convolutional networks." European semantic web conference. Springer, Cham, 2018.
 
-They have been evaluated in link prediction experiments.
+- [Composition-based Graph Convolutional Networks (CompGCNs)](https://openreview.net/pdf?id=BylA_C4tPr).
 
-They are implemented based on [Pytorch Geometric](https://github.com/rusty1s/pytorch_geometric). With self-explanatory comments, the code is beginner-friendly. But if you are not familiar with Pytorch Geometric, checking out these [Colab Notebooks](https://pytorch-geometric.readthedocs.io/en/latest/notes/colabs.html) could be a good start. 
+> <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/compgcn.png" alt="CompGCN Arch" width="50%"> </p>
+> Chiang, Wei-Lin, et al. "Cluster-gcn: An efficient algorithm for training deep and large graph convolutional networks." Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining. 2019.
 
-This work is still in progress, so I would be very grateful if you can find any bug or give me any feedback. Cheers!
+The implementation is based on [Pytorch Geometric](https://github.com/rusty1s/pytorch_geometric).
 
-----
-### Environment
+To train on GPUs with limited memory, the training graph can be partitioned into subgraphs based on the method proposed in [ClusterGCN](https://dl.acm.org/doi/abs/10.1145/3292500.3330925).  
 
-| python | torch | torch-scatter | torch-geometric |
+> <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/cluster_gcn.png" alt="Knowledge Graph Partitioning" width="60%"> </p>
+> Chiang, Wei-Lin, et al. "Cluster-gcn: An efficient algorithm for training deep and large graph convolutional networks." Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining. 2019.
+
+## Environment
+
+| python | pytorch | pytorch-scatter | pytorch-geometric |
 | ---- | ---- | ---- | ---- |
-| `3.7.10` | `1.8.0` | `2.0.6` | `1.6.3` |
+| `3.8.11` | `1.9.0` | `2.0.8` | `1.7.2` |
 
-Please refer to [Installation](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html) for the installation of torch-scatter and torch-geometric. 
+- Detailed requirements: [environment.yml](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/environment.yml)
 
-----
-### Dataset - FB15K237
+## Dataset - FB15K237
 
 | file | first line | other lines |
 | ---- | ---- | ---- |
@@ -30,8 +37,7 @@ Please refer to [Installation](https://pytorch-geometric.readthedocs.io/en/lates
 | `relation2id.txt` | number of relations: `237` | `relation_name + '\t' + relation_id` |
 | `train2id.txt`, `valid2id.txt`, `test2id.txt` | number of training, validation, and testing triples: `272,115`, `17,535`, `20,466` | `head_entity_id + ' ' + tail_entity_id + ' ' + relation_id` |
 
-----
-### Experimental Results
+## Experimental Results
 
 - Note: the following only reports in-progress results; model architectures and hyperparameters are not well set. 
 
