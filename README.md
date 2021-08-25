@@ -63,7 +63,6 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 - The results of MRR, hits@1, and hits@3 are better than those reported in the original paper.
 - The model was tested after 17 epochs. I believe the performance, especially MR, can be improved with more epochs.
 - The training takes about 40 minutes on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
-- [Commit of this training setting](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1)
 - [Code](https://github.com/ruijie-wang-uzh/geometric_gnns/tree/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1/rgcn)
 - [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/logs/rgcn_lp.aug.2021.md)
 - [Pretrained Model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/pretrained/FB15K237/rgcn_lp.pt)

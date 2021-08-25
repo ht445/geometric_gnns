@@ -39,6 +39,9 @@ class RgcnLP(torch.nn.Module):
         scores = self.distmult(head_embeds=head_embeds, tail_embeds=tail_embeds, rel_ids=rel_ids)  # size: (batch_size)
         return scores
 
+    def reg_loss(self, x: FloatTensor, rel_ids: LongTensor) -> float:
+        rel_embeds = torch.index_select(input=self.distmult.rel_embeds, index=torch.unique(rel_ids), dim=0)
+        return torch.mean(x.pow(2)) + torch.mean(rel_embeds.pow(2))
 
 # the RGCN model
 class RGCN(torch_geometric.nn.MessagePassing, ABC):

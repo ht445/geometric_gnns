@@ -13,10 +13,11 @@ class RgcnMain:
         self.model_path = "../pretrained/FB15K237/rgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 1000  # number of training epochs
+        self.num_epochs = 50  # number of training epochs
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = 0.0005  # learning rate
         self.dropout = 0.2  # dropout rate
+        self.penalty = 0.01  # regularization loss ratio
 
         self.aggr = "add"  # aggregation scheme to use in RGCN, "add" | "mean" | "max"
         self.embed_dim = 100  # entity embedding dimension
@@ -58,9 +59,10 @@ class RgcnMain:
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
         print("- dropout rate: `{}`".format(self.dropout))
+        print("- regularization loss ratio: `{}`".format(self.penalty))
         print("- number of bases: `{}`".format(self.num_bases))
         print("- rgcn aggregation scheme: `{}`".format(self.aggr))
-        print("- number of subgraphs: {}".format(self.num_subgraphs))
+        print("- number of subgraphs: `{}`".format(self.num_subgraphs))
         print("- training subgraph batch size: `{}`".format(self.subgraph_batch_size))
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
@@ -146,8 +148,12 @@ class RgcnMain:
                 pos_targets = torch.ones(pos_triples.size(0))
                 neg_targets = torch.zeros(neg_triples.size(0))
                 train_targets = torch.cat((pos_targets, neg_targets), dim=0)
-                batch_loss = criterion(input=scores, target=train_targets.to(self.device))
+                bce_loss = criterion(input=scores, target=train_targets.to(self.device))
 
+                # compute regularization loss
+                reg_loss = rgcn_lp.reg_loss(x=x, rel_ids=train_triples[:, 1].to(self.device))
+
+                batch_loss = bce_loss + self.penalty * reg_loss
                 batch_loss.backward()
                 optimizer.step()
                 epoch_loss += batch_loss
@@ -171,8 +177,8 @@ class RgcnMain:
             x = model.encode(ent_ids=self.graph.x.squeeze(1), edge_index=self.graph.edge_index, edge_type=self.graph.edge_attr.squeeze(1))
             x = x.to(self.device)
             model.to(self.device)
-            ranks = torch.zeros(5, 2).to(self.device)  # [[h_mr, t_mr], [h_mrr, t_mrr], [h_hit1, t_hit1], [h_hit3, t_hit3], [h_hit10, t_hit10]]
-            batch_num = 0
+            all_head_ranks = None
+            all_tail_ranks = None
             index_set = IndexSet(num_indices=self.count[mode])
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
@@ -196,17 +202,10 @@ class RgcnMain:
                     false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
                 false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
                 head_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
-
-                h_mr = torch.mean(head_ranks.to(torch.float))  # mean head rank
-                h_mrr = torch.mean(1. / head_ranks.to(torch.float))  # mean head reciprocal rank
-                if self.device.type == "cuda":
-                    h_hit1 = torch.nonzero(torch.cuda.BoolTensor(head_ranks <= 1)).size()[0] / head_ranks.size()[0]  # head hit@1
-                    h_hit3 = torch.nonzero(torch.cuda.BoolTensor(head_ranks <= 3)).size()[0] / head_ranks.size()[0]  # head hit@3
-                    h_hit10 = torch.nonzero(torch.cuda.BoolTensor(head_ranks <= 10)).size()[0] / head_ranks.size()[0]  # head hit@10
+                if all_head_ranks is None:
+                    all_head_ranks = head_ranks.to(torch.float)
                 else:
-                    h_hit1 = torch.nonzero(torch.BoolTensor(head_ranks <= 1)).size()[0] / head_ranks.size()[0]  # head hit@1
-                    h_hit3 = torch.nonzero(torch.BoolTensor(head_ranks <= 3)).size()[0] / head_ranks.size()[0]  # head hit@3
-                    h_hit10 = torch.nonzero(torch.BoolTensor(head_ranks <= 10)).size()[0] / head_ranks.size()[0]  # head hit@10
+                    all_head_ranks = torch.cat((all_head_ranks, head_ranks.to(torch.float)), dim=0)
 
                 # tail prediction
                 tails = triples[:, 2].view(-1, 1).to(self.device)  # (batch_size, 1)
@@ -223,22 +222,33 @@ class RgcnMain:
                     false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
                 false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
                 tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
-
-                t_mr = torch.mean(tail_ranks.to(torch.float))  # mean tail rank
-                t_mrr = torch.mean(1. / tail_ranks.to(torch.float))  # mean tail reciprocal rank
-                if self.device.type == "cuda":
-                    t_hit1 = torch.nonzero(torch.cuda.BoolTensor(tail_ranks <= 1)).size()[0] / tail_ranks.size()[0]  # tail hit@1
-                    t_hit3 = torch.nonzero(torch.cuda.BoolTensor(tail_ranks <= 3)).size()[0] / tail_ranks.size()[0]  # tail hit@3
-                    t_hit10 = torch.nonzero(torch.cuda.BoolTensor(tail_ranks <= 10)).size()[0] / tail_ranks.size()[0]  # tail hit@10
+                if all_tail_ranks is None:
+                    all_tail_ranks = tail_ranks.to(torch.float)
                 else:
-                    t_hit1 = torch.nonzero(torch.BoolTensor(tail_ranks <= 1)).size()[0] / tail_ranks.size()[0]  # tail hit@1
-                    t_hit3 = torch.nonzero(torch.BoolTensor(tail_ranks <= 3)).size()[0] / tail_ranks.size()[0]  # tail hit@3
-                    t_hit10 = torch.nonzero(torch.BoolTensor(tail_ranks <= 10)).size()[0] / tail_ranks.size()[0]  # tail hit@10
+                    all_tail_ranks = torch.cat((all_tail_ranks, tail_ranks.to(torch.float)), dim=0)
 
-                ranks += torch.FloatTensor([[h_mr, t_mr], [h_mrr, t_mrr], [h_hit1, t_hit1], [h_hit3, t_hit3], [h_hit10, t_hit10]]).to(self.device)
-                batch_num += 1
-            ranks = ranks / batch_num
-            mean_ranks = torch.mean(ranks, dim=1)  # (5)
+            h_mr = torch.mean(all_head_ranks)  # mean head rank
+            h_mrr = torch.mean(1. / all_head_ranks)  # mean head reciprocal rank
+            if self.device.type == "cuda":
+                h_hit1 = torch.nonzero(torch.cuda.BoolTensor(all_head_ranks <= 1)).size(0) / all_head_ranks.size(0)  # head hit@1
+                h_hit3 = torch.nonzero(torch.cuda.BoolTensor(all_head_ranks <= 3)).size(0) / all_head_ranks.size(0)  # head hit@3
+                h_hit10 = torch.nonzero(torch.cuda.BoolTensor(all_head_ranks <= 10)).size(0) / all_head_ranks.size(0)  # head hit@10
+            else:
+                h_hit1 = torch.nonzero(torch.BoolTensor(all_head_ranks <= 1)).size(0) / all_head_ranks.size(0)  # head hit@1
+                h_hit3 = torch.nonzero(torch.BoolTensor(all_head_ranks <= 3)).size(0) / all_head_ranks.size(0)  # head hit@3
+                h_hit10 = torch.nonzero(torch.BoolTensor(all_head_ranks <= 10)).size(0) / all_head_ranks.size(0)  # head hit@10
+
+            t_mr = torch.mean(all_tail_ranks)  # mean tail rank
+            t_mrr = torch.mean(1. / all_tail_ranks)  # mean tail reciprocal rank
+            if self.device.type == "cuda":
+                t_hit1 = torch.nonzero(torch.cuda.BoolTensor(all_tail_ranks <= 1)).size(0) / all_tail_ranks.size(0)  # tail hit@1
+                t_hit3 = torch.nonzero(torch.cuda.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
+                t_hit10 = torch.nonzero(torch.cuda.BoolTensor(all_tail_ranks <= 10)).size(0) / all_tail_ranks.size(0)  # tail hit@10
+            else:
+                t_hit1 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 1)).size(0) / all_tail_ranks.size(0)  # tail hit@1
+                t_hit3 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
+                t_hit10 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 10)).size(0) / all_tail_ranks.size(0)  # tail hit@10
+
             print_dic = {"valid": "validation results", "test": "testing results"}
             if mode == "valid":
                 print("- {}  at epoch `{}`".format(print_dic[mode], epoch))
@@ -247,15 +257,15 @@ class RgcnMain:
             print("   ")
             print("|  metric  |  head  |  tail  |  mean  |  ")
             print("|  ----  |  ----  |  ----  |  ----  |  ")
-            print("|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[1, 0], ranks[1, 1], mean_ranks[1]))
-            print("|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[0, 0], ranks[0, 1], mean_ranks[0]))
-            print("|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[2, 0], ranks[2, 1], mean_ranks[2]))
-            print("|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[3, 0], ranks[3, 1], mean_ranks[3]))
-            print("|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[4, 0], ranks[4, 1], mean_ranks[4]))
+            print("|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr, t_mrr, (h_mrr + t_mrr)/2))
+            print("|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr, t_mr, (h_mr + t_mr)/2))
+            print("|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit1, t_hit1, (h_hit1 + t_hit1)/2))
+            print("|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
+            print("|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit10, t_hit10, (h_hit10 + t_hit10)/2))
             print("   ")
         if mode == "valid":
-            if self.highest_mrr < mean_ranks[1]:
-                self.highest_mrr = mean_ranks[1]
+            if self.highest_mrr < (h_mrr + t_mrr)/2:
+                self.highest_mrr = (h_mrr + t_mrr)/2
                 torch.save(model.state_dict(), self.model_path)
                 print("- model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
         model.train()
