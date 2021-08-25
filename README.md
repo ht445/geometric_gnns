@@ -9,10 +9,10 @@ Two popular Graph Convolutional Networks (GCNs) are implemented:
 > <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/rgcn.png" alt="RGCN Arch" width="40%"> </p>
 > Schlichtkrull, Michael, et al. "Modeling relational data with graph convolutional networks." European semantic web conference. Springer, Cham, 2018.
 
-- [Composition-based Graph Convolutional Networks (CompGCNs)](https://openreview.net/pdf?id=BylA_C4tPr).
+- [Composition-based Graph Convolutional Networks (CompGCNs)](https://arxiv.org/abs/1911.03082).
 
 > <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/compgcn.png" alt="CompGCN Arch" width="50%"> </p>
-> Chiang, Wei-Lin, et al. "Cluster-gcn: An efficient algorithm for training deep and large graph convolutional networks." Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining. 2019.
+> Vashishth, Shikhar, et al. "Composition-based Multi-Relational Graph Convolutional Networks." International Conference on Learning Representations. 2019.
 
 The implementation is based on [Pytorch Geometric](https://github.com/rusty1s/pytorch_geometric).
 
@@ -44,7 +44,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 | Model | MRR | MR | Hits@1 | Hits@3 | Hits@10 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
 | [RGCN](https://arxiv.org/abs/1703.06103) | 0.248 | - | 0.153 | 0.258 | 0.414 | 
-| [CompGCN](https://openreview.net/pdf?id=BylA_C4tPr) | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
+| [CompGCN](https://arxiv.org/abs/1911.03082) | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
 
 ## Experimental Results
 
