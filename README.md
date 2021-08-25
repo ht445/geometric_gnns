@@ -31,7 +31,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 ## Dataset
 
-- FB15K237
+### FB15K237
 
 | file | first line | other lines |
 | ---- | ---- | ---- |
@@ -39,26 +39,34 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 | `relation2id.txt` | number of relations: 237 | `relation_name + '\t' + relation_id` |
 | `train2id.txt`, `valid2id.txt`, `test2id.txt` | number of training, validation, and testing triples: 272,115, 17,535, 20,466 | `head_entity_id + ' ' + tail_entity_id + ' ' + relation_id` |
 
-- Performance reported in the papers
+### Performance reported in the papers
 
 | Model | MRR | MR | Hit@1 | Hit@3 | Hit@10 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| RGCN | 0.248 | - | 0.153 | 0.258 | 0.414 | 
-| CompGCN | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
+| [RGCN]((https://arxiv.org/abs/1703.06103)) | 0.248 | - | 0.153 | 0.258 | 0.414 | 
+| [CompGCN](https://openreview.net/pdf?id=BylA_C4tPr) | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
 
 ## Experimental Results
 
-- Note: the following only reports in-progress results; model architectures and hyperparameters are not well set. 
+### RGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/5015ff55862741ed2c8f1b271b24645771ed951e))
 
-- RGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/90bc1f39a6600498e3adc557dca9d51e16abbc15))
+- Testing results of the rgcn implementation:
 
 |  metric  |  head  |  tail  |  mean  |  
 |  ----  |  ----  |  ----  |  ----  |  
-|  mean rank (MR)  |  `393.8387145996094`  |  `228.19479370117188`  |  `311.0167541503906`  |  
-|  mean reciprocal rank (MRR)  |  `0.11209864914417267`  |  `0.2061285823583603`  |  `0.15911361575126648`  |  
-|  hit@1  |  `0.049701616168022156`  |  `0.11677433550357819`  |  `0.08323797583580017`  |  
-|  hit@3  |  `0.11515237390995026`  |  `0.2234063744544983`  |  `0.16927936673164368`  |  
-|  hit@10  |  `0.24000363051891327`  |  `0.396608829498291`  |  `0.31830623745918274`  |  
+|  mean reciprocal rank (MRR)  |  `0.2861877679824829`  |  `0.30698487162590027`  |  **`0.2965863347053528`**  |  
+|  mean rank (MR)  |  `1139.7838134765625`  |  `901.492919921875`  |  `1020.6383666992188`  |  
+|  hit@1  |  `0.2779405117034912`  |  `0.2906406819820404`  |  **`0.284290611743927`**  |  
+|  hit@3  |  `0.2817016839981079`  |  `0.3014359176158905`  |  **`0.2915688157081604`**  |  
+|  hit@10  |  `0.29752829670906067`  |  `0.33006083965301514`  |  `0.3137945532798767`  |
+
+- The results of MRR, hit@1, and hit@3 are better than those reported in the original paper.
+- The model was tested after 17 epochs. I believe the performance can be improved with more epochs.
+- The training takes about 40 minutes on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
+- [Commit of this training setting](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/5015ff55862741ed2c8f1b271b24645771ed951e)
+- [Code](https://github.com/ruijie-wang-uzh/geometric_gnns/tree/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1/rgcn)
+- [Running log]()
+- [Pretrained Model]()
 
 - CompGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079))
 
