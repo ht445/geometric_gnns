@@ -54,18 +54,15 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 |  metric  |  head  |  tail  |  mean  |  
 |  ----  |  ----  |  ----  |  ----  |  
-|  mean reciprocal rank (MRR)  |  `0.2861877679824829`  |  `0.30698487162590027`  |  **`0.2965863347053528`**  |  
-|  mean rank (MR)  |  `1139.7838134765625`  |  `901.492919921875`  |  `1020.6383666992188`  |  
-|  hits@1  |  `0.2779405117034912`  |  `0.2906406819820404`  |  **`0.284290611743927`**  |  
-|  hits@3  |  `0.2817016839981079`  |  `0.3014359176158905`  |  **`0.2915688157081604`**  |  
-|  hits@10  |  `0.29752829670906067`  |  `0.33006083965301514`  |  `0.3137945532798767`  |
+|  mean reciprocal rank (MRR)  |  `0.26442909240722656`  |  `0.28572818636894226`  |  **`0.2750786542892456`**  |
+|  hits@1  |  `0.2517834457148441`  |  `0.2642919964819701`  |  **`0.2580377210984071`**  |  
+|  hits@3  |  `0.2595524284178638`  |  `0.2789015928857618`  |  **`0.26922701065181276`**  |  
+|  hits@10  |  `0.2842274992670771`  |  `0.32199745920062545`  |  `0.30311247923385126`  |  
 
 - The results of MRR, hits@1, and hits@3 are better than those reported in the original paper.
-- The model was tested after 17 epochs. I believe the performance, especially MR, can be improved with more epochs.
-- The training takes about 40 minutes on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
-- [Code](https://github.com/ruijie-wang-uzh/geometric_gnns/tree/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1/rgcn)
-- [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/logs/rgcn_lp.aug.2021.md)
-- [Pretrained Model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/pretrained/FB15K237/rgcn_lp.pt)
+- The training takes about 1 hour on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
+- [Running log]()
+- [Pretrained Model]()
 
 ### CompGCN
 

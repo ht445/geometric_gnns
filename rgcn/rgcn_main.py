@@ -29,6 +29,8 @@ class RgcnMain:
         self.subgraph_batch_size = 24  # number of subgraphs in each batch
         self.vt_batch_size = 12  # validation/test batch size
 
+        self.highest_mrr = 0.  # highest mrr in validation
+
         self.gpu = "cuda:2"  # the device to use, "cpu" | "cuda:x"
         if torch.cuda.is_available():
             self.device = torch.device(self.gpu)
@@ -45,7 +47,6 @@ class RgcnMain:
         self.graph = None  # the pytorch geometric graph consisting of training triples, Data(x, edge_index, edge_attr);
         self.cluster_data = None  # generated subgraphs
         self.cluster_loader = None  # subgraph batch loader
-        self.highest_mrr = 0.  # highest mrr in validation
 
         print("-----")
         print("### Running - `{}`".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -67,6 +68,7 @@ class RgcnMain:
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
+        print("- highest mrr: `{}`".format(self.highest_mrr))
         print("- device: `{}`".format(self.device))
 
     def data_pre(self):
