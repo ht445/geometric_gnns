@@ -44,7 +44,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 | Model | MRR | MR | Hit@1 | Hit@3 | Hit@10 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
 | RGCN | 0.248 | - | 0.153 | 0.258 | 0.414 | 
-| CompGCN | 0.355 | 197 | 0.535 | 0.390 | 0.264 |
+| CompGCN | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
 
 ## Experimental Results
 

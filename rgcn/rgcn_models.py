@@ -30,10 +30,10 @@ class RgcnLP(torch.nn.Module):
         x = self.rgcn2.forward(x=x, edge_index=edge_index, edge_type=edge_type)
         return x  # size: (num_entities_in_the_current_batch, dimension)
 
-    def decode(self, x: FloatTensor, train_triples: LongTensor) -> FloatTensor:
-        head_ids = train_triples[:, 0]
-        rel_ids = train_triples[:, 1]
-        tail_ids = train_triples[:, 2]
+    def decode(self, x: FloatTensor, triples: LongTensor) -> FloatTensor:
+        head_ids = triples[:, 0]
+        rel_ids = triples[:, 1]
+        tail_ids = triples[:, 2]
         head_embeds = torch.index_select(input=x, index=head_ids, dim=0)  # head entity embeddings, size: (batch_size, dimension)
         tail_embeds = torch.index_select(input=x, index=tail_ids, dim=0)  # tail entity embeddings, size: (batch_size, dimension)
         scores = self.distmult(head_embeds=head_embeds, tail_embeds=tail_embeds, rel_ids=rel_ids)  # size: (batch_size)
@@ -85,6 +85,7 @@ class Distmult(torch.nn.Module):
     def __init__(self, num_relations: int, dimension: int):
         super(Distmult, self).__init__()
         self.rel_embeds = torch.nn.Parameter(torch.FloatTensor(num_relations, dimension))  # the "diagonal" of relation matrices
+        torch.nn.init.kaiming_uniform_(self.rel_embeds, nonlinearity="leaky_relu")
 
     def forward(self, head_embeds: FloatTensor, tail_embeds: FloatTensor, rel_ids: LongTensor) -> FloatTensor:
         rel_embeds = torch.index_select(input=self.rel_embeds, index=rel_ids, dim=0)  # size: (batch_size, dimension)
