@@ -41,7 +41,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 ### Performance reported in the papers
 
-| Model | MRR | MR | Hit@1 | Hit@3 | Hit@10 |
+| Model | MRR | MR | Hits@1 | Hits@3 | Hits@10 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
 | [RGCN](https://arxiv.org/abs/1703.06103) | 0.248 | - | 0.153 | 0.258 | 0.414 | 
 | [CompGCN](https://openreview.net/pdf?id=BylA_C4tPr) | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
@@ -56,11 +56,11 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  ----  |  ----  |  ----  |  ----  |  
 |  mean reciprocal rank (MRR)  |  `0.2861877679824829`  |  `0.30698487162590027`  |  **`0.2965863347053528`**  |  
 |  mean rank (MR)  |  `1139.7838134765625`  |  `901.492919921875`  |  `1020.6383666992188`  |  
-|  hit@1  |  `0.2779405117034912`  |  `0.2906406819820404`  |  **`0.284290611743927`**  |  
-|  hit@3  |  `0.2817016839981079`  |  `0.3014359176158905`  |  **`0.2915688157081604`**  |  
-|  hit@10  |  `0.29752829670906067`  |  `0.33006083965301514`  |  `0.3137945532798767`  |
+|  hits@1  |  `0.2779405117034912`  |  `0.2906406819820404`  |  **`0.284290611743927`**  |  
+|  hits@3  |  `0.2817016839981079`  |  `0.3014359176158905`  |  **`0.2915688157081604`**  |  
+|  hits@10  |  `0.29752829670906067`  |  `0.33006083965301514`  |  `0.3137945532798767`  |
 
-- The results of MRR, hit@1, and hit@3 are better than those reported in the original paper.
+- The results of MRR, hits@1, and hits@3 are better than those reported in the original paper.
 - The model was tested after 17 epochs. I believe the performance, especially MR, can be improved with more epochs.
 - The training takes about 40 minutes on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
 - [Commit of this training setting](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1)
@@ -74,8 +74,8 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  ----  |  ----  |  ----  |  ----  |  
 |  mean rank (MR)  |  `673.3828735351562`  |  `2129.835693359375`  |  `1401.6092529296875`  |  
 |  mean reciprocal rank (MRR)  |  `0.12702743709087372`  |  `0.10114094614982605`  |  `0.11408419162034988`  |  
-|  hit@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
-|  hit@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
-|  hit@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |
+|  hits@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
+|  hits@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
+|  hits@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |
 
 - [commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079)

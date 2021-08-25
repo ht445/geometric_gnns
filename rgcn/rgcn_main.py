@@ -249,9 +249,9 @@ class RgcnMain:
             print("|  ----  |  ----  |  ----  |  ----  |  ")
             print("|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[1, 0], ranks[1, 1], mean_ranks[1]))
             print("|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[0, 0], ranks[0, 1], mean_ranks[0]))
-            print("|  hit@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[2, 0], ranks[2, 1], mean_ranks[2]))
-            print("|  hit@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[3, 0], ranks[3, 1], mean_ranks[3]))
-            print("|  hit@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[4, 0], ranks[4, 1], mean_ranks[4]))
+            print("|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[2, 0], ranks[2, 1], mean_ranks[2]))
+            print("|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[3, 0], ranks[3, 1], mean_ranks[3]))
+            print("|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(ranks[4, 0], ranks[4, 1], mean_ranks[4]))
             print("   ")
         if mode == "valid":
             if self.highest_mrr < mean_ranks[1]:
