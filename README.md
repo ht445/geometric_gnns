@@ -48,7 +48,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 ## Experimental Results
 
-### RGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/5015ff55862741ed2c8f1b271b24645771ed951e))
+### RGCN
 
 - Testing results of the rgcn implementation:
 
@@ -61,14 +61,14 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  hit@10  |  `0.29752829670906067`  |  `0.33006083965301514`  |  `0.3137945532798767`  |
 
 - The results of MRR, hit@1, and hit@3 are better than those reported in the original paper.
-- The model was tested after 17 epochs. I believe the performance can be improved with more epochs.
+- The model was tested after 17 epochs. I believe the performance, especially MR, can be improved with more epochs.
 - The training takes about 40 minutes on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
-- [Commit of this training setting](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/5015ff55862741ed2c8f1b271b24645771ed951e)
+- [Commit of this training setting](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1)
 - [Code](https://github.com/ruijie-wang-uzh/geometric_gnns/tree/bb8e468845d5a24fc4b20cf70fb4c8902d3a2fa1/rgcn)
-- [Running log]()
-- [Pretrained Model]()
+- [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/logs/rgcn_lp.aug.2021.md)
+- [Pretrained Model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/f20873618df35b3479dcdbb11d9a59c33f252c29/pretrained/FB15K237/rgcn_lp.pt)
 
-- CompGCN ([commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079))
+### CompGCN
 
 |  metric  |  head  |  tail  |  mean  |  
 |  ----  |  ----  |  ----  |  ----  |  
@@ -77,3 +77,5 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  hit@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
 |  hit@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
 |  hit@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |
+
+- [commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079)
