@@ -62,7 +62,7 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 - The results of MRR, hits@1, and hits@3 are better than those reported in the original paper.
 - The training takes about 1 hour on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
 - [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/2dc89c75fe480c5379408aea972d38217dc62e5d/logs/rgcn_lp.aug.2021.md)
-- [Pretrained model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/2dc89c75fe480c5379408aea972d38217dc62e5d/pretrained/FB15K237/rgcn_lp.pt)
+- [Pretrained model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/946622e922547515373291267745c8594ce1cf6d/pretrained/FB15K237/rgcn_lp.pt)
 
 ### CompGCN
 
