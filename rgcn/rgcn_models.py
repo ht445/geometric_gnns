@@ -43,7 +43,7 @@ class RgcnLP(torch.nn.Module):
         rel_embeds = torch.index_select(input=self.distmult.rel_embeds, index=torch.unique(rel_ids), dim=0)
         return torch.mean(x.pow(2)) + torch.mean(rel_embeds.pow(2))
 
-# the RGCN model
+
 class RGCN(torch_geometric.nn.MessagePassing, ABC):
     def __init__(self, in_dimension: int, out_dimension: int, num_relations: int, num_bases: int, aggr: str):
         super(RGCN, self).__init__()
