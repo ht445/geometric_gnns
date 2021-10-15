@@ -26,7 +26,7 @@ class CompgcnMain:
         self.neg_num = 1  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
 
-        self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
+        self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
         self.subgraph_batch_size = 24  # number of subgraphs in each batch
         self.vt_batch_size = 12  # validation/test batch size (num of triples)
 
@@ -94,10 +94,10 @@ class CompgcnMain:
         # add inverse relations
         sources = edge_index[0, :]
         targets = edge_index[1, :]
-        edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)
-        edge_attr = torch.cat((edge_attr, edge_attr + self.count["relation"]), dim=0)
-        y = torch.cat((y, torch.ones(self.count["train"], 1, dtype=torch.long)), dim=0)
-        self.count["relation"] = self.count["relation"] * 2
+        edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)  # size: (2, num_train_triples * 2)
+        edge_attr = torch.cat((edge_attr, edge_attr + self.count["relation"]), dim=0)  # size: (num_train_triples * 2, 1)
+        y = torch.cat((y, torch.ones(self.count["train"], 1, dtype=torch.long)), dim=0)  # size: (num_train_triples * 2, 1)
+        self.count["relation"] = self.count["relation"] * 2  # double the number of relations
 
         # add self-loops
         self_loop_id = torch.LongTensor([self.count["relation"]])  # id of the self-loop relation

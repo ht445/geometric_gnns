@@ -23,14 +23,14 @@ class CompgcnLP(torch.nn.Module):
         self.compgcn2 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)  # two compGCN layers
 
     def encode(self, ent_ids: LongTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor) -> [FloatTensor]:
-        x = torch.index_select(input=self.ent_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
+        x = torch.index_select(input=self.entity_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
         r = torch.matmul(self.coefficients, self.bases)  # size: (num_relations, dimension)
-        x, r = self.rgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
+        x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
         x = functional.leaky_relu(x)
         r = functional.leaky_relu(r)
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
         r = functional.dropout(input=r, p=self.dropout, training=self.training)
-        x, r = self.rgcn2.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
+        x, r = self.compgcn2.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
         return x, r
 
     def decode(self, x: FloatTensor, r: FloatTensor, triples: LongTensor) -> FloatTensor:

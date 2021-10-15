@@ -382,3 +382,31 @@
 - model saved to `../pretrained/FB15K237/rgcn_lp.pt` at epoch `15`   
 - epoch `16`, loss `0.9911497235298157`, time `2021-06-24 10:24:24`  
 - epoch `17`, loss `0.9515782594680786`, time `2021-06-24 10:32:20`  
+-----
+### Running - `2021-09-01 14:35:08`
+#### Configurations
+- load data from `../data/FB15K237/`
+- new training
+- embedding dimension: `100`
+- number of negative triples: `1`
+- learning rate: `0.0005`
+- dropout rate: `0.2`
+- regularization loss ratio: `0.01`
+- number of bases: `50`
+- rgcn aggregation scheme: `add`
+- number of subgraphs: `200`
+- training subgraph batch size: `24`
+- number of epochs: `50`
+- validation frequency: `1`
+- validation/test triple batch size: `12`
+- highest mrr: `0.0`
+- device: `cuda:2`
+#### Preparing Data
+- number of entities: `14541`
+- number of original relations: `237`
+- number of original training triples: `272115`
+- number of validation triples: `17535`
+- number of testing triples: `20466`
+Computing METIS partitioning...
+Done!
+#### Model Training and Validation
