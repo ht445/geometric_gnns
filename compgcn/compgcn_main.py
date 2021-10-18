@@ -14,13 +14,13 @@ class CompgcnMain:
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 1000  # number of training epochs
+        self.num_epochs = 300  # number of training epochs
         self.valid_freq = 1  # do validation every x training epochs
-        self.lr = 0.001  # learning rate
+        self.lr = 0.01  # learning rate
         self.dropout = 0.2  # dropout rate
-        self.penalty = 0.01  # regularization loss ratio
+        self.weight_decay = 0.001  # weight decay
 
-        self.aggr = "mean"  # aggregation scheme to use in CompGCN, "add" | "mean" | "max"
+        self.aggr = "add"  # aggregation scheme to use in CompGCN, "add" | "mean" | "max"
         self.embed_dim = 100  # entity embedding dimension
         self.norm = 2  # norm of TransE's loss func
 
@@ -28,14 +28,16 @@ class CompgcnMain:
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
 
         self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
-        self.subgraph_batch_size = 24  # number of subgraphs in each batch
+        self.cluster_size = 24  # number of subgraphs in each cluster
+
+        self.batch_size = 256  # training batch size
         self.vt_batch_size = 64  # validation/test batch size (num of triples)
 
         self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:2")
-            self.eval_device = torch.device("cuda:3")
+            self.device = torch.device("cuda:3")
+            self.eval_device = torch.device("cuda:4")
         else:
             self.device = torch.device("cpu")
             self.eval_device = torch.device("cpu")
@@ -63,13 +65,14 @@ class CompgcnMain:
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
         print("- dropout rate: `{}`".format(self.dropout))
-        print("- regularization loss ratio: `{}`".format(self.penalty))
+        print("- weight decay: `{}`".format(self.weight_decay))
         print("- number of bases: `{}`".format(self.num_bases))
         print("- compgcn aggregation scheme: `{}`".format(self.aggr))
         print("- number of subgraphs: `{}`".format(self.num_subgraphs))
-        print("- training subgraph batch size: `{}`".format(self.subgraph_batch_size))
+        print("- training subgraph batch size: `{}`".format(self.cluster_size))
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
+        print("- training triple batch size: `{}`".format(self.batch_size))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
         print("- highest mrr: `{}`".format(self.highest_mrr))
         print("- device: `{}`".format(self.device))
@@ -104,9 +107,7 @@ class CompgcnMain:
 
         # add self-loops
         self_loop_id = torch.LongTensor([self.count["relation"]])  # id of the self-loop relation
-        edge_index = torch.cat((edge_index, torch.cat(
-            (torch.arange(self.count["entity"]).unsqueeze(0), torch.arange(self.count["entity"]).unsqueeze(0)), dim=0)),
-                               dim=1)  # size: (2, num_train_triples * 2 + num_entities)
+        edge_index = torch.cat((edge_index, torch.cat((torch.arange(self.count["entity"]).unsqueeze(0), torch.arange(self.count["entity"]).unsqueeze(0)), dim=0)), dim=1)  # size: (2, num_train_triples * 2 + num_entities)
         edge_attr = torch.cat((edge_attr, self_loop_id.repeat(edge_index.size(1) - edge_attr.size(0), 1)), dim=0)  # size: (num_train_triples * 2 + num_entities, 1)
         y = torch.cat((y, torch.ones(edge_attr.size(0) - y.size(0), 1, dtype=torch.long) + 1), dim=0)  # size: (num_train_triples * 2 + num_entities, 1)
         self.count["relation"] += 1
@@ -117,7 +118,7 @@ class CompgcnMain:
 
         # partition the training graph and instantiate the subgraph loader
         self.cluster_data = torch_geometric.data.ClusterData(data=self.graph, num_parts=self.num_subgraphs)
-        self.cluster_loader = torch_geometric.data.ClusterLoader(cluster_data=self.cluster_data, batch_size=self.subgraph_batch_size, shuffle=True)
+        self.cluster_loader = torch_geometric.data.ClusterLoader(cluster_data=self.cluster_data, batch_size=self.cluster_size, shuffle=True)
 
     def train(self):
         print("#### Model Training and Validation")
@@ -129,25 +130,18 @@ class CompgcnMain:
         compgcn_lp.to(self.device)
 
         # use Adam as the optimizer
-        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # use binary cross entropy loss as the loss function
         criterion = torch.nn.BCELoss()
 
         compgcn_lp.train()
+        plot = True
         for epoch in range(self.num_epochs):
             print("* epoch {}".format(epoch))
             epoch_loss = 0.
             cluster_size = []
             for step, cluster in enumerate(self.cluster_loader):
-                optimizer.zero_grad()
-
                 cluster_size.append(cluster.edge_index.size(1))
-                # update entity (only those appear in the current batch) and relation embeddings
-                x, r = compgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
-                                         edge_index=cluster.edge_index.to(self.device),
-                                         edge_type=cluster.edge_attr.squeeze(1).to(self.device),
-                                         y=cluster.y.squeeze(1).to(self.device))
-                # x: (num_entities_in_the_current_batch, dimension); r: (num_relations, dimension)
 
                 # filter inverse and self-loop triples and sample negative triples
                 pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
@@ -155,32 +149,48 @@ class CompgcnMain:
                                                             rel_ids=cluster.edge_attr.squeeze(1),
                                                             tail_ids=cluster.edge_index[1, :],
                                                             hr2t=self.hr2t, tr2h=self.tr2h, neg_num=self.neg_num)
-                # pos_triples: (num_original_triples_in_the_current_batch, 3), neg_triples: (neg_num * num_original_triples_in_the_current_batch, 3)
+                # pos_triples, size: (num_original_triples_in_the_cluster, 3)
+                # neg_triples, size: (num_original_triples_in_the_cluster * neg_num, 3)
 
-                train_triples = torch.cat((pos_triples, neg_triples), dim=0)
+                index_set = IndexSet(num_indices=pos_triples.size(0))
+                index_loader = DataLoader(dataset=index_set, batch_size=self.batch_size, shuffle=True)
 
-                # compute scores for positive and negative triples
-                scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))
+                for batch in index_loader:
+                    pos_batch_triples = torch.index_select(input=pos_triples, index=batch, dim=0)
+                    neg_batch_triples = torch.index_select(input=neg_triples, index=batch * self.neg_num, dim=0)
+                    for i in range(self.neg_num):
+                        if i > 0:
+                            neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch * self.neg_num + i, dim=0)), dim=0)
 
-                # compute binary cross-entropy loss
-                pos_targets = torch.zeros(pos_triples.size(0)) + 0.5
-                neg_targets = torch.ones(neg_triples.size(0))
-                train_targets = torch.cat((pos_targets, neg_targets), dim=0)
-                bce_loss = criterion(input=scores, target=train_targets.to(self.device))
+                    optimizer.zero_grad()
+                    # update entity and relation embeddings in the current cluster
+                    x, r = compgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
+                                             edge_index=cluster.edge_index.to(self.device),
+                                             edge_type=cluster.edge_attr.squeeze(1).to(self.device),
+                                             y=cluster.y.squeeze(1).to(self.device))
+                    # x: (num_entities_in_the_current_cluster, dimension); r: (num_relations, dimension)
 
-                # compute regularization loss
-                reg_loss = compgcn_lp.reg_loss(x=x, r=r, rel_ids=train_triples[:, 1].to(self.device))
+                    # compute scores for positive and negative triples
+                    train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
+                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))
 
-                batch_loss = bce_loss + self.penalty * reg_loss
+                    # compute binary cross-entropy loss
+                    pos_targets = torch.zeros(pos_batch_triples.size(0)) + 0.5
+                    neg_targets = torch.ones(neg_batch_triples.size(0))
+                    train_targets = torch.cat((pos_targets, neg_targets), dim=0)
+                    batch_loss = criterion(input=scores, target=train_targets.to(self.device))
 
-                if epoch == 0 and step == 0:
-                    dot = torchviz.make_dot(batch_loss, params=dict(compgcn_lp.named_parameters()))
-                    dot.format = 'png'
-                    dot.render('./compgcn_lp_graph')
-                batch_loss.backward()
-                optimizer.step()
-                epoch_loss += batch_loss
-            print("\t * number of triples in each batch, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
+                    if plot:
+                        dot = torchviz.make_dot(batch_loss, params=dict(compgcn_lp.named_parameters()))
+                        dot.format = 'png'
+                        dot.render('./compgcn_lp_graph')
+                        plot = False
+
+                    batch_loss.backward()
+                    optimizer.step()
+                    epoch_loss += batch_loss
+
+            print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
             print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
             if epoch % self.valid_freq == 0:

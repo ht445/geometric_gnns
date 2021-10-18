@@ -27,14 +27,15 @@ class CompgcnLP(torch.nn.Module):
         r = torch.matmul(self.coefficients, self.bases)  # size: (num_relations, dimension)
 
         x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
-        x = functional.leaky_relu(x)
-        r = functional.leaky_relu(r)
+
+        # x = functional.leaky_relu(x)
+        # r = functional.leaky_relu(r)
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
         r = functional.dropout(input=r, p=self.dropout, training=self.training)
 
         x, r = self.compgcn2.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
 
-        x = functional.normalize(input=x, p=self.norm, dim=1)
+        x = functional.normalize(input=x, p=2, dim=1)
         return x, r
 
     def decode(self, x: FloatTensor, r: FloatTensor, triples: LongTensor) -> FloatTensor:
@@ -46,10 +47,6 @@ class CompgcnLP(torch.nn.Module):
         tail_embeds = torch.index_select(input=x, index=tail_ids, dim=0)  # tail entity embeddings, size: (batch_size, dimension)
         scores = torch.norm(head_embeds + rel_embeds - tail_embeds, p=self.norm, dim=1)  # size: (batch_size)
         return torch.sigmoid(scores)
-
-    def reg_loss(self, x: FloatTensor, r: FloatTensor, rel_ids: LongTensor) -> float:
-        rel_embeds = torch.index_select(input=r, index=torch.unique(rel_ids), dim=0)
-        return torch.mean(x.pow(2)) + torch.mean(rel_embeds.pow(2))
 
 
 class CompGCN(torch_geometric.nn.MessagePassing, ABC):
@@ -72,7 +69,7 @@ class CompGCN(torch_geometric.nn.MessagePassing, ABC):
         # y: relation type list: 0-original, 1-inverse, or 2-self-loop, size: (num_edges);
         updated_x = self.propagate(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)  # propagate messages along edges and compute updated entity embeddings
         updated_r = torch.matmul(r, self.relation_weight)  # size: (num_relations, out_dimension)
-        return updated_x, updated_r  # updated entity embeddings; updated_x size: (num_entities, out_dimension); updated_r size: (num_relations, out_dimension)]
+        return torch.tanh(updated_x), updated_r  # updated entity embeddings; updated_x size: (num_entities, out_dimension); updated_r size: (num_relations, out_dimension)]
 
     def message(self, x_j: FloatTensor, r: FloatTensor, edge_type: FloatTensor, y: FloatTensor) -> FloatTensor:
         # x_j: embeddings of source entities, size: (num_edges, in_dimension);
