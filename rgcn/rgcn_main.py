@@ -1,4 +1,5 @@
 import torch
+import torchviz
 import torch_scatter
 import torch_geometric
 from datetime import datetime
@@ -26,7 +27,9 @@ class RgcnMain:
         self.num_bases = 50  # number of bases for relation matrices in RGCN
 
         self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
-        self.subgraph_batch_size = 24  # number of subgraphs in each batch
+        self.cluster_size = 24  # number of subgraphs in each cluster
+
+        self.batch_size = 256  # training batch size
         self.vt_batch_size = 12  # validation/test batch size
 
         self.highest_mrr = 0.  # highest mrr in validation
@@ -64,7 +67,8 @@ class RgcnMain:
         print("- number of bases: `{}`".format(self.num_bases))
         print("- rgcn aggregation scheme: `{}`".format(self.aggr))
         print("- number of subgraphs: `{}`".format(self.num_subgraphs))
-        print("- training subgraph batch size: `{}`".format(self.subgraph_batch_size))
+        print("- training cluster size: `{}`".format(self.cluster_size))
+        print("- training batch size: `{}`".format(self.batch_size))
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
@@ -108,7 +112,7 @@ class RgcnMain:
 
         # partition the training graph and instantiate the subgraph loader
         self.cluster_data = torch_geometric.data.ClusterData(data=self.graph, num_parts=self.num_subgraphs)
-        self.cluster_loader = torch_geometric.data.ClusterLoader(cluster_data=self.cluster_data, batch_size=self.subgraph_batch_size, shuffle=True)
+        self.cluster_loader = torch_geometric.data.ClusterLoader(cluster_data=self.cluster_data, batch_size=self.cluster_size, shuffle=True)
 
     def train(self):
         print("#### Model Training and Validation")
@@ -125,15 +129,13 @@ class RgcnMain:
         criterion = torch.nn.BCELoss()
 
         rgcn_lp.train()
+        plot = True
         for epoch in range(self.num_epochs):
+            print("* epoch {}".format(epoch))
             epoch_loss = 0.
+            cluster_size = []
             for step, cluster in enumerate(self.cluster_loader):
-                optimizer.zero_grad()
-
-                # encode entities in the current batch
-                x = rgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
-                                   edge_index=cluster.edge_index.to(self.device),
-                                   edge_type=cluster.edge_attr.squeeze(1).to(self.device))
+                cluster_size.append(cluster.edge_index.size(1))
 
                 # filter inverse and self-loop triples and sample negative triples
                 pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
@@ -141,25 +143,50 @@ class RgcnMain:
                                                             rel_ids=cluster.edge_attr.squeeze(1),
                                                             tail_ids=cluster.edge_index[1, :],
                                                             hr2t=self.hr2t, tr2h=self.tr2h, neg_num=self.neg_num)
-                train_triples = torch.cat((pos_triples, neg_triples), dim=0)
 
-                # compute scores for positive and negative triples
-                scores = rgcn_lp.decode(x=x, triples=train_triples.to(self.device))
+                index_set = IndexSet(num_indices=pos_triples.size(0))
+                index_loader = DataLoader(dataset=index_set, batch_size=self.batch_size, shuffle=True)
 
-                # compute binary cross-entropy loss
-                pos_targets = torch.ones(pos_triples.size(0))
-                neg_targets = torch.zeros(neg_triples.size(0))
-                train_targets = torch.cat((pos_targets, neg_targets), dim=0)
-                bce_loss = criterion(input=scores, target=train_targets.to(self.device))
+                for batch in index_loader:
+                    pos_batch_triples = torch.index_select(input=pos_triples, index=batch, dim=0)
+                    neg_batch_triples = torch.index_select(input=neg_triples, index=batch * self.neg_num, dim=0)
+                    for i in range(self.neg_num):
+                        if i > 0:
+                            neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch * self.neg_num + i, dim=0)), dim=0)
 
-                # compute regularization loss
-                reg_loss = rgcn_lp.reg_loss(x=x, rel_ids=train_triples[:, 1].to(self.device))
+                    optimizer.zero_grad()
 
-                batch_loss = bce_loss + self.penalty * reg_loss
-                batch_loss.backward()
-                optimizer.step()
-                epoch_loss += batch_loss
-            print("- epoch `{}`, loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    # encode entities in the current batch
+                    x = rgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
+                                       edge_index=cluster.edge_index.to(self.device),
+                                       edge_type=cluster.edge_attr.squeeze(1).to(self.device))
+
+                    # compute scores for positive and negative triples
+                    train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
+                    scores = rgcn_lp.decode(x=x, triples=train_triples.to(self.device))
+
+                    # compute binary cross-entropy loss
+                    pos_targets = torch.ones(pos_batch_triples.size(0))
+                    neg_targets = torch.zeros(neg_batch_triples.size(0))
+                    train_targets = torch.cat((pos_targets, neg_targets), dim=0)
+                    bce_loss = criterion(input=scores, target=train_targets.to(self.device))
+
+                    if plot:
+                        dot = torchviz.make_dot(bce_loss, params=dict(rgcn_lp.named_parameters()))
+                        dot.format = 'png'
+                        dot.render('./compgcn_lp_graph')
+                        plot = False
+
+                    # compute regularization loss
+                    reg_loss = rgcn_lp.reg_loss(x=x, rel_ids=train_triples[:, 1].to(self.device))
+
+                    batch_loss = bce_loss + self.penalty * reg_loss
+                    batch_loss.backward()
+                    optimizer.step()
+                    epoch_loss += batch_loss
+
+            print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
+            print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
             if epoch % self.valid_freq == 0:
                 self.evaluate(mode="valid", epoch=epoch, model=rgcn_lp)
@@ -185,8 +212,7 @@ class RgcnMain:
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
                 triples = torch.index_select(input=self.triples[mode], index=batch, dim=0).to(self.device)  # (batch_size, 3)
-                correct_heads = torch.index_select(input=self.correct_heads[mode], index=batch, dim=0).to(self.device)  # (batch_size, num_entities)
-                correct_tails = torch.index_select(input=self.correct_tails[mode], index=batch, dim=0).to(self.device)  # (batch_size, num_entities)
+
                 all_entities = torch.arange(self.count["entity"]).repeat(triples.size()[0], 1).unsqueeze(2).to(self.device)  # (batch_size, num_entities, 1)
 
                 # head prediction
@@ -196,13 +222,27 @@ class RgcnMain:
 
                 new_head_scores = model.decode(x=x, triples=new_head_triples)  # (batch_size * num_entities)
                 new_head_scores = new_head_scores.view(triples.size()[0], self.count["entity"])  # (batch_size, num_entities)
-                filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (batch_size, num_entities)
+
+                if mode == "valid":
+                    filtered_head_scores = new_head_scores
+                elif mode == "test":
+                    correct_heads = torch.index_select(input=self.correct_heads[mode], index=batch, dim=0).to(self.device)  # (batch_size, num_entities)
+                    filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (batch_size, num_entities)
                 correct_scores = torch.gather(input=filtered_head_scores, dim=1, index=heads)  # (batch_size, 1)
+
                 if self.device.type == "cuda":
-                    false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    if mode == "valid":
+                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_head_scores >= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    elif mode == "test":
+                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
                 else:
-                    false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
+                    if mode == "valid":
+                        false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores >= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    elif mode == "test":
+                        false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
+
                 head_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
                 if all_head_ranks is None:
                     all_head_ranks = head_ranks.to(torch.float)
@@ -216,13 +256,27 @@ class RgcnMain:
 
                 new_tail_scores = model.decode(x=x, triples=new_tail_triples)  # (batch_size * num_entities)
                 new_tail_scores = new_tail_scores.view(triples.size()[0], self.count["entity"])  # (batch_size, num_entities)
-                filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (batch_size, num_entities)
+
+                if mode == "valid":
+                    filtered_tail_scores = new_tail_scores
+                elif mode == "test":
+                    correct_tails = torch.index_select(input=self.correct_tails[mode], index=batch, dim=0).to(self.device)  # (batch_size, num_entities)
+                    filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (batch_size, num_entities)
                 correct_scores = torch.gather(input=filtered_tail_scores, dim=1, index=tails)  # (batch_size, 1)
+
                 if self.device.type == "cuda":
-                    false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    if mode == "valid":
+                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_tail_scores >= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    elif mode == "test":
+                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
                 else:
-                    false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
+                    if mode == "valid":
+                        false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores >= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    elif mode == "test":
+                        false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores > correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.device)), dim=0)
+
                 tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
                 if all_tail_ranks is None:
                     all_tail_ranks = tail_ranks.to(torch.float)
@@ -251,25 +305,25 @@ class RgcnMain:
                 t_hit3 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
                 t_hit10 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 10)).size(0) / all_tail_ranks.size(0)  # tail hit@10
 
-            print_dic = {"valid": "validation results", "test": "testing results"}
+            print_dic = {"valid": "validation results (raw)", "test": "testing results (filtered)"}
             if mode == "valid":
-                print("- {}  at epoch `{}`".format(print_dic[mode], epoch))
+                print("\t * {}  at epoch `{}`".format(print_dic[mode], epoch))
             else:
                 print("- {}  ".format(print_dic[mode]))
             print("   ")
-            print("|  metric  |  head  |  tail  |  mean  |  ")
-            print("|  ----  |  ----  |  ----  |  ----  |  ")
-            print("|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr, t_mrr, (h_mrr + t_mrr)/2))
-            print("|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr, t_mr, (h_mr + t_mr)/2))
-            print("|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit1, t_hit1, (h_hit1 + t_hit1)/2))
-            print("|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
-            print("|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit10, t_hit10, (h_hit10 + t_hit10)/2))
+            print("\t\t|  metric  |  head  |  tail  |  mean  |  ")
+            print("\t\t|  ----  |  ----  |  ----  |  ----  |  ")
+            print("\t\t|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr, t_mrr, (h_mrr + t_mrr)/2))
+            print("\t\t|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr, t_mr, (h_mr + t_mr)/2))
+            print("\t\t|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit1, t_hit1, (h_hit1 + t_hit1)/2))
+            print("\t\t|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
+            print("\t\t|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit10, t_hit10, (h_hit10 + t_hit10)/2))
             print("   ")
         if mode == "valid":
             if self.highest_mrr < (h_mrr + t_mrr)/2:
                 self.highest_mrr = (h_mrr + t_mrr)/2
                 torch.save(model.state_dict(), self.model_path)
-                print("- model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
+                print("\t * model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
         model.train()
 
 

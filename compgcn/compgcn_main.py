@@ -14,30 +14,30 @@ class CompgcnMain:
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 300  # number of training epochs
+        self.num_epochs = 500  # number of training epochs
         self.valid_freq = 1  # do validation every x training epochs
-        self.lr = 0.01  # learning rate
+        self.lr = 0.001  # learning rate
         self.dropout = 0.2  # dropout rate
-        self.weight_decay = 0.001  # weight decay
+        self.weight_decay = 0.  # weight decay
 
-        self.aggr = "add"  # aggregation scheme to use in CompGCN, "add" | "mean" | "max"
-        self.embed_dim = 100  # entity embedding dimension
-        self.norm = 2  # norm of TransE's loss func
+        self.aggr = "add"  # aggregation scheme to use in CompGCN
+        self.embed_dim = 200  # entity embedding dimension
+        self.norm = 2  # norm
 
         self.neg_num = 1  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
 
-        self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
-        self.cluster_size = 24  # number of subgraphs in each cluster
+        self.num_subgraphs = 400  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
+        self.cluster_size = 12  # number of subgraphs in each cluster
 
-        self.batch_size = 256  # training batch size
+        self.batch_size = 128  # training batch size
         self.vt_batch_size = 64  # validation/test batch size (num of triples)
 
         self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:3")
-            self.eval_device = torch.device("cuda:4")
+            self.device = torch.device("cuda:2")
+            self.eval_device = torch.device("cuda:3")
         else:
             self.device = torch.device("cpu")
             self.eval_device = torch.device("cpu")
@@ -46,8 +46,6 @@ class CompgcnMain:
         self.triples = None  # {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
         self.hr2t = None  # {(head_entity_id, relation_id): [tail_entity_ids, ...]}
         self.tr2h = None  # {(tail_entity_id, relation_id): [head_entity_ids, ...]}
-        self.correct_heads = None  # {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
-        self.correct_tails = None  # {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
 
         self.graph = None  # the pytorch geometric graph consisting of training triples, Data(x, edge_index, edge_attr);
         self.cluster_data = None  # generated subgraphs
@@ -69,7 +67,7 @@ class CompgcnMain:
         print("- number of bases: `{}`".format(self.num_bases))
         print("- compgcn aggregation scheme: `{}`".format(self.aggr))
         print("- number of subgraphs: `{}`".format(self.num_subgraphs))
-        print("- training subgraph batch size: `{}`".format(self.cluster_size))
+        print("- training cluster size: `{}`".format(self.cluster_size))
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- training triple batch size: `{}`".format(self.batch_size))
@@ -80,7 +78,7 @@ class CompgcnMain:
 
     def data_pre(self):
         print("#### Preparing Data")
-        self.count, self.triples, self.hr2t, self.tr2h, self.correct_heads, self.correct_tails = read_data(self.data_path)
+        self.count, self.triples, self.hr2t, self.tr2h = read_data(self.data_path)
         print("- number of entities: `{}`".format(self.count["entity"]))
         print("- number of original relations: `{}`".format(self.count["relation"]))
         print("- number of original training triples: `{}`".format(self.count["train"]))
@@ -163,6 +161,7 @@ class CompgcnMain:
                             neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch * self.neg_num + i, dim=0)), dim=0)
 
                     optimizer.zero_grad()
+
                     # update entity and relation embeddings in the current cluster
                     x, r = compgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
                                              edge_index=cluster.edge_index.to(self.device),
@@ -175,8 +174,8 @@ class CompgcnMain:
                     scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))
 
                     # compute binary cross-entropy loss
-                    pos_targets = torch.zeros(pos_batch_triples.size(0)) + 0.5
-                    neg_targets = torch.ones(neg_batch_triples.size(0))
+                    pos_targets = torch.sigmoid(torch.zeros(pos_batch_triples.size(0)))
+                    neg_targets = torch.sigmoid(torch.ones(neg_batch_triples.size(0)))
                     train_targets = torch.cat((pos_targets, neg_targets), dim=0)
                     batch_loss = criterion(input=scores, target=train_targets.to(self.device))
 
@@ -213,7 +212,11 @@ class CompgcnMain:
             r = r.to(self.eval_device)
             model.to(self.eval_device)
             all_head_ranks = None
+            all_head_equals = None
+            all_head_ranks2 = None
             all_tail_ranks = None
+            all_tail_equals = None
+            all_tail_ranks2 = None
             index_set = IndexSet(num_indices=self.count[mode])
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
@@ -229,31 +232,26 @@ class CompgcnMain:
                 new_head_scores = model.decode(x=x, r=r, triples=new_head_triples)  # (batch_size * num_entities)
                 new_head_scores = new_head_scores.view(triples.size(0), self.count["entity"])  # (batch_size, num_entities)
 
-                if mode == "valid":
-                    filtered_head_scores = new_head_scores
-                elif mode == "test":
-                    correct_heads = torch.index_select(input=self.correct_heads[mode], index=batch, dim=0).to(self.eval_device)  # (batch_size, num_entities)
-                    filtered_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (batch_size, num_entities)
-                correct_scores = torch.gather(input=filtered_head_scores, dim=1, index=heads)  # (batch_size, 1)
+                correct_scores = torch.gather(input=new_head_scores, dim=1, index=heads)  # (batch_size, 1)
 
                 if self.eval_device.type == "cuda":
-                    if mode == "valid":
-                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_head_scores <= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                    elif mode == "test":
-                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_head_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
+                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    false_equals = torch.nonzero(torch.cuda.BoolTensor(new_head_scores == correct_scores), as_tuple=True)[0]
                 else:
-                    if mode == "valid":
-                        false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores <= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                    elif mode == "test":
-                        false_positives = torch.nonzero(torch.BoolTensor(filtered_head_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
-
+                    false_positives = torch.nonzero(torch.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    false_equals = torch.nonzero(torch.BoolTensor(new_head_scores == correct_scores), as_tuple=True)[0]
+                false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
                 head_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0), dtype=torch.long).to(self.eval_device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
+                head_equals = torch_scatter.scatter(src=torch.ones(false_equals.size(0), dtype=torch.long).to(self.eval_device), index=false_equals, dim=0)
+                head_equals = head_equals - 1
                 if all_head_ranks is None:
                     all_head_ranks = head_ranks.to(torch.float)
+                    all_head_equals = head_equals.to(torch.float)
+                    all_head_ranks2 = (head_ranks + head_equals).to(torch.float)
                 else:
                     all_head_ranks = torch.cat((all_head_ranks, head_ranks.to(torch.float)), dim=0)
+                    all_head_equals = torch.cat((all_head_equals, head_equals.to(torch.float)), dim=0)
+                    all_head_ranks2 = torch.cat((all_head_ranks2, (head_ranks + head_equals).to(torch.float)), dim=0)
 
                 # tail prediction
                 tails = triples[:, 2].view(-1, 1).to(self.eval_device)  # (batch_size, 1)
@@ -263,34 +261,31 @@ class CompgcnMain:
                 new_tail_scores = model.decode(x=x, r=r, triples=new_tail_triples)  # (batch_size * num_entities)
                 new_tail_scores = new_tail_scores.view(triples.size(0), self.count["entity"])  # (batch_size, num_entities)
 
-                if mode == "valid":
-                    filtered_tail_scores = new_tail_scores
-                elif mode == "test":
-                    correct_tails = torch.index_select(input=self.correct_tails[mode], index=batch, dim=0).to(self.eval_device)  # (batch_size, num_entities)
-                    filtered_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (batch_size, num_entities)
-                correct_scores = torch.gather(input=filtered_tail_scores, dim=1, index=tails)  # (batch_size, 1)
-
+                correct_scores = torch.gather(input=new_tail_scores, dim=1, index=tails)  # (batch_size, 1)
                 if self.eval_device.type == "cuda":
-                    if mode == "valid":
-                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_tail_scores <= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                    elif mode == "test":
-                        false_positives = torch.nonzero(torch.cuda.BoolTensor(filtered_tail_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
+                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    false_equals = torch.nonzero(torch.cuda.BoolTensor(new_tail_scores == correct_scores), as_tuple=True)[0]
                 else:
-                    if mode == "valid":
-                        false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores <= correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                    elif mode == "test":
-                        false_positives = torch.nonzero(torch.BoolTensor(filtered_tail_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
-                        false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
-
+                    false_positives = torch.nonzero(torch.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of the entities having higher scores than correct ones
+                    false_equals = torch.nonzero(torch.BoolTensor(new_tail_scores == correct_scores), as_tuple=True)[0]
+                false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
                 tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0), dtype=torch.long).to(self.eval_device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
+                tail_equals = torch_scatter.scatter(src=torch.ones(false_equals.size(0), dtype=torch.long).to(self.eval_device), index=false_equals, dim=0)
+                tail_equals = tail_equals - 1
                 if all_tail_ranks is None:
                     all_tail_ranks = tail_ranks.to(torch.float)
+                    all_tail_equals = tail_equals.to(torch.float)
+                    all_tail_ranks2 = (tail_ranks + tail_equals).to(torch.float)
                 else:
                     all_tail_ranks = torch.cat((all_tail_ranks, tail_ranks.to(torch.float)), dim=0)
+                    all_tail_equals = torch.cat((all_tail_equals, tail_equals.to(torch.float)), dim=0)
+                    all_tail_ranks2 = torch.cat((all_tail_ranks2, (tail_ranks + tail_equals).to(torch.float)), dim=0)
 
             h_mr = torch.mean(all_head_ranks)  # mean head rank
             h_mrr = torch.mean(1. / all_head_ranks)  # mean head reciprocal rank
+            h_me = torch.mean(all_head_equals)
+            h_mr2 = torch.mean(all_head_ranks2)  # mean head rank
+            h_mrr2 = torch.mean(1. / all_head_ranks2)  # mean head reciprocal rank
             if self.eval_device.type == "cuda":
                 h_hit1 = torch.nonzero(torch.cuda.BoolTensor(all_head_ranks <= 1)).size(0) / all_head_ranks.size(0)  # head hit@1
                 h_hit3 = torch.nonzero(torch.cuda.BoolTensor(all_head_ranks <= 3)).size(0) / all_head_ranks.size(0)  # head hit@3
@@ -302,6 +297,9 @@ class CompgcnMain:
 
             t_mr = torch.mean(all_tail_ranks)  # mean tail rank
             t_mrr = torch.mean(1. / all_tail_ranks)  # mean tail reciprocal rank
+            t_me = torch.mean(all_tail_equals)
+            t_mr2 = torch.mean(all_tail_ranks2)  # mean tail rank
+            t_mrr2 = torch.mean(1. / all_tail_ranks2)  # mean tail reciprocal rank
             if self.eval_device.type == "cuda":
                 t_hit1 = torch.nonzero(torch.cuda.BoolTensor(all_tail_ranks <= 1)).size(0) / all_tail_ranks.size(0)  # tail hit@1
                 t_hit3 = torch.nonzero(torch.cuda.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
@@ -311,7 +309,7 @@ class CompgcnMain:
                 t_hit3 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
                 t_hit10 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 10)).size(0) / all_tail_ranks.size(0)  # tail hit@10
 
-            print_dic = {"valid": "validation results (raw)", "test": "testing results (filtered)"}
+            print_dic = {"valid": "validation results (raw)", "test": "testing results (raw)"}
             if mode == "valid":
                 print("\t * {}  at epoch `{}`".format(print_dic[mode], epoch))
             else:
@@ -321,6 +319,9 @@ class CompgcnMain:
             print("\t\t|  ----  |  ----  |  ----  |  ----  |  ")
             print("\t\t|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr, t_mrr, (h_mrr + t_mrr)/2))
             print("\t\t|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr, t_mr, (h_mr + t_mr)/2))
+            print("\t\t|  mean equal (ME)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_me, t_me, (h_me + t_me) / 2))
+            print("\t\t|  mrr considering equals  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr2, t_mrr2,(h_mrr2 + t_mrr2) / 2))
+            print("\t\t|  mr considering equals  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr2, t_mr2, (h_mr2 + t_mr2) / 2))
             print("\t\t|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit1, t_hit1, (h_hit1 + t_hit1)/2))
             print("\t\t|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
             print("\t\t|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit10, t_hit10, (h_hit10 + t_hit10)/2))
