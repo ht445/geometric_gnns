@@ -1,4 +1,6 @@
 import torch
+import wandb
+from itertools import product
 import torchviz
 import torch_scatter
 import torch_geometric
@@ -9,21 +11,21 @@ from compgcn_utils import read_data, train_triple_pre, IndexSet
 
 
 class CompgcnMain:
-    def __init__(self):
+    def __init__(self, lr: float, batch_size: int, margin: float):
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 500  # number of training epochs
+        self.num_epochs = 50  # number of training epochs
+
         self.valid_freq = 1  # do validation every x training epochs
-        self.lr = 0.01  # learning rate
+        self.lr = lr  # learning rate
         self.dropout = 0.2  # dropout rate
-        self.weight_decay = 0.01  # weight decay
 
         self.aggr = "add"  # aggregation scheme to use in CompGCN
         self.embed_dim = 200  # entity embedding dimension
         self.norm = 2  # norm
-        self.margin = 1  # score margin
+        self.margin = margin  # score margin
 
         self.neg_num = 1  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
@@ -31,7 +33,7 @@ class CompgcnMain:
         self.num_subgraphs = 400  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
         self.cluster_size = 12  # number of subgraphs in each cluster
 
-        self.batch_size = 128  # training batch size
+        self.batch_size = batch_size  # training batch size
         self.vt_batch_size = 64  # validation/test batch size (num of triples)
 
         self.highest_mrr = 0.  # highest validation mrr during training
@@ -52,6 +54,8 @@ class CompgcnMain:
         self.cluster_data = None  # generated subgraphs
         self.cluster_loader = None  # subgraph batch loader
 
+    def print_config(self):
+
         print("-----")
         print("### Running - `{}`".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         print("#### Configurations")
@@ -64,7 +68,6 @@ class CompgcnMain:
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
         print("- dropout rate: `{}`".format(self.dropout))
-        print("- weight decay: `{}`".format(self.weight_decay))
         print("- number of bases: `{}`".format(self.num_bases))
         print("- compgcn aggregation scheme: `{}`".format(self.aggr))
         print("- number of subgraphs: `{}`".format(self.num_subgraphs))
@@ -131,12 +134,14 @@ class CompgcnMain:
         compgcn_lp.to(self.device)
 
         # use Adam as the optimizer
-        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr)
         # use binary cross entropy loss as the loss function
         criterion = torch.nn.MarginRankingLoss(margin=self.margin)
 
         compgcn_lp.train()
         plot = True
+
+        wandb.watch(compgcn_lp, criterion, log="all", log_freq=10)
         for epoch in range(self.num_epochs):
             print("* epoch {}".format(epoch))
             epoch_loss = 0.
@@ -200,11 +205,13 @@ class CompgcnMain:
             if epoch % self.valid_freq == 0:
                 self.evaluate(mode="valid", epoch=epoch, model=compgcn_lp)
 
+            wandb.log({"epoch loss": epoch_loss}, step=epoch)
+
     def test(self):
         print("#### testing")
         test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         test_model.load_state_dict(torch.load(self.model_path))
-        self.evaluate(mode="test", epoch=0, model=test_model)
+        self.evaluate(mode="test", epoch=self.num_epochs, model=test_model)
         print("-----")
         print("  ")
 
@@ -331,6 +338,19 @@ class CompgcnMain:
             print("\t\t|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
             print("\t\t|  hits@10  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit10, t_hit10, (h_hit10 + t_hit10)/2))
             print("   ")
+
+            if mode == "test":
+                wandb.log({"epoch loss": 0.}, step=epoch)
+            wandb.log({"MR": (h_mr + t_mr)/2,
+                       "MRR": (h_mrr + t_mrr)/2,
+                       "hits@1": (h_hit1 + t_hit1)/2,
+                       "hits@3": (h_hit3 + t_hit3)/2,
+                       "hits@10": (h_hit10 + t_hit10)/2,
+                       "ME": (h_me + t_me) / 2,
+                       "MR_ME": (h_mr2 + t_mr2) / 2,
+                       "MRR_ME": (h_mrr2 + t_mrr2) / 2
+                       }, step=epoch)
+
         if mode == "valid":
             if self.highest_mrr < (h_mrr + t_mrr)/2:
                 self.highest_mrr = (h_mrr + t_mrr)/2
@@ -341,7 +361,40 @@ class CompgcnMain:
 
 
 if __name__ == "__main__":
-    compgcn_main = CompgcnMain()
-    compgcn_main.data_pre()
-    compgcn_main.train()
-    compgcn_main.test()
+    wandb.login()
+
+    lrs = [0.001, 0.0005, 0.0001]
+    batch_sizes = [128, 256]
+    margins = [1, 10]
+    params = list(product(lrs, batch_sizes, margins))
+
+    for param in params:
+        compgcn_main = CompgcnMain(lr=param[0], batch_size=param[1], margin=param[2])
+        config = {
+            "data_path": compgcn_main.data_path,
+            "model_path": compgcn_main.model_path,
+            "from_pre": compgcn_main.from_pre,
+            "num_epochs": compgcn_main.num_epochs,
+            "valid_freq": compgcn_main.valid_freq,
+            "learning_rate": compgcn_main.lr,
+            "dropout": compgcn_main.dropout,
+            "aggr": compgcn_main.aggr,
+            "embed_dim": compgcn_main.embed_dim,
+            "norm": compgcn_main.norm,
+            "margin": compgcn_main.margin,
+            "neg_num": compgcn_main.neg_num,
+            "num_bases": compgcn_main.num_bases,
+            "num_subgraphs": compgcn_main.num_subgraphs,
+            "cluster_size": compgcn_main.cluster_size,
+            "batch_size": compgcn_main.batch_size,
+            "vt_batch_size": compgcn_main.vt_batch_size,
+            "highest_mrr": compgcn_main.highest_mrr,
+            "training_device": compgcn_main.device,
+            "evaluation_device": compgcn_main.eval_device,
+        }
+        with wandb.init(entity="ruijie", project="compgcn", config=config):
+            compgcn_main.print_config()
+            compgcn_main.data_pre()
+            compgcn_main.train()
+            compgcn_main.test()
+            wandb.finish()
