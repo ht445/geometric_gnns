@@ -1,6 +1,7 @@
 import torch
+import numpy as np
+from torch import LongTensor
 from torch.utils.data import Dataset
-from torch import FloatTensor, LongTensor
 
 
 def read_data(data_path: str) -> []:
@@ -42,27 +43,7 @@ def read_data(data_path: str) -> []:
             tr2h[(tail, relation)].append(head)
             line = f.readline()
 
-    # mask correct heads and tails in tensors that would be used to compute filtered results
-    correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]),
-                     "test": torch.LongTensor(count["test"], count["entity"])}
-    correct_tails = {"valid": torch.LongTensor(count["valid"], count["entity"]),
-                     "test": torch.LongTensor(count["test"], count["entity"])}
-    for name in ["valid", "test"]:
-        current_triples = triples[name]  # size: (num_valid/test_triples, 3)
-        for i in range(count[name]):
-            current_triple = current_triples[i, :]  # size: (3)
-            current_head, current_relation, current_tail = int(current_triple[0]), int(current_triple[1]), int(
-                current_triple[2])
-            correct_heads[name][i, :] = torch.arange(count["entity"])
-            if (current_tail, current_relation) in tr2h:
-                for correct_head in tr2h[(current_tail, current_relation)]:
-                    correct_heads[name][i, correct_head] = current_head
-            correct_tails[name][i, :] = torch.arange(count["entity"])
-            if (current_head, current_relation) in hr2t:
-                for correct_tail in hr2t[(current_head, current_relation)]:
-                    correct_tails[name][i, correct_tail] = current_tail
-
-    return count, triples, hr2t, tr2h, correct_heads, correct_tails
+    return count, triples, hr2t, tr2h
 
 
 def train_triple_pre(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: LongTensor, tail_ids: LongTensor, hr2t: dict, tr2h: dict, neg_num: int) -> [LongTensor]:

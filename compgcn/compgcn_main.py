@@ -16,13 +16,14 @@ class CompgcnMain:
         self.from_pre = False  # True: continue training
         self.num_epochs = 500  # number of training epochs
         self.valid_freq = 1  # do validation every x training epochs
-        self.lr = 0.001  # learning rate
+        self.lr = 0.01  # learning rate
         self.dropout = 0.2  # dropout rate
-        self.weight_decay = 0.  # weight decay
+        self.weight_decay = 0.01  # weight decay
 
         self.aggr = "add"  # aggregation scheme to use in CompGCN
         self.embed_dim = 200  # entity embedding dimension
         self.norm = 2  # norm
+        self.margin = 1  # score margin
 
         self.neg_num = 1  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
@@ -71,6 +72,8 @@ class CompgcnMain:
         print("- number of epochs: `{}`".format(self.num_epochs))
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- training triple batch size: `{}`".format(self.batch_size))
+        print("- norm: `{}`".format(self.norm))
+        print("- margin: `{}`".format(self.margin))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
         print("- highest mrr: `{}`".format(self.highest_mrr))
         print("- device: `{}`".format(self.device))
@@ -122,7 +125,7 @@ class CompgcnMain:
         print("#### Model Training and Validation")
 
         # instantiate the model
-        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout)
+        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         if self.from_pre:
             compgcn_lp.load_state_dict(torch.load(self.model_path))
         compgcn_lp.to(self.device)
@@ -130,7 +133,7 @@ class CompgcnMain:
         # use Adam as the optimizer
         optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # use binary cross entropy loss as the loss function
-        criterion = torch.nn.BCELoss()
+        criterion = torch.nn.MarginRankingLoss(margin=self.margin)
 
         compgcn_lp.train()
         plot = True
@@ -171,13 +174,15 @@ class CompgcnMain:
 
                     # compute scores for positive and negative triples
                     train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
-                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))
+                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))  # size: (batch_size)
 
-                    # compute binary cross-entropy loss
-                    pos_targets = torch.sigmoid(torch.zeros(pos_batch_triples.size(0)))
-                    neg_targets = torch.sigmoid(torch.ones(neg_batch_triples.size(0)))
-                    train_targets = torch.cat((pos_targets, neg_targets), dim=0)
-                    batch_loss = criterion(input=scores, target=train_targets.to(self.device))
+                    pos_scores = scores[:pos_batch_triples.size(0)]  # (num_training_triples)
+                    neg_scores = torch.mean(scores[pos_batch_triples.size(0):].view(pos_batch_triples.size(0), -1), dim=1)
+
+                    targets = torch.ones(pos_batch_triples.size(0)) * -1
+
+                    # compute margin ranking loss
+                    batch_loss = criterion(input1=pos_scores, input2=neg_scores, target=targets.to(self.device))
 
                     if plot:
                         dot = torchviz.make_dot(batch_loss, params=dict(compgcn_lp.named_parameters()))
@@ -197,7 +202,7 @@ class CompgcnMain:
 
     def test(self):
         print("#### testing")
-        test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout)
+        test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         test_model.load_state_dict(torch.load(self.model_path))
         self.evaluate(mode="test", epoch=0, model=test_model)
         print("-----")
@@ -320,7 +325,7 @@ class CompgcnMain:
             print("\t\t|  mean reciprocal rank (MRR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr, t_mrr, (h_mrr + t_mrr)/2))
             print("\t\t|  mean rank (MR)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr, t_mr, (h_mr + t_mr)/2))
             print("\t\t|  mean equal (ME)  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_me, t_me, (h_me + t_me) / 2))
-            print("\t\t|  mrr considering equals  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr2, t_mrr2,(h_mrr2 + t_mrr2) / 2))
+            print("\t\t|  mrr considering equals  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mrr2, t_mrr2, (h_mrr2 + t_mrr2) / 2))
             print("\t\t|  mr considering equals  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_mr2, t_mr2, (h_mr2 + t_mr2) / 2))
             print("\t\t|  hits@1  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit1, t_hit1, (h_hit1 + t_hit1)/2))
             print("\t\t|  hits@3  |  `{}`  |  `{}`  |  `{}`  |  ".format(h_hit3, t_hit3, (h_hit3 + t_hit3)/2))
@@ -340,4 +345,3 @@ if __name__ == "__main__":
     compgcn_main.data_pre()
     compgcn_main.train()
     compgcn_main.test()
-

@@ -6,10 +6,11 @@ from torch import LongTensor, FloatTensor
 
 
 class CompgcnLP(torch.nn.Module):
-    def __init__(self, num_entities: int, num_relations: int, dimension: int, num_bases: int, aggr: str, norm: int, dropout: float):
+    def __init__(self, num_entities: int, num_relations: int, dimension: int, num_bases: int, aggr: str, norm: int, dropout: float, margin: float):
         super(CompgcnLP, self).__init__()
         self.norm = norm
         self.dropout = dropout
+        self.margin = margin
 
         self.entity_embeds = torch.nn.Parameter(torch.FloatTensor(num_entities, dimension))  # entity embeddings, size: (num_entities, dimension)
         torch.nn.init.xavier_normal_(self.entity_embeds)
@@ -47,7 +48,7 @@ class CompgcnLP(torch.nn.Module):
         rel_embeds = torch.index_select(input=r, index=rel_ids, dim=0)  # relation embeddings, size: (batch_size, dimension)
         tail_embeds = torch.index_select(input=x, index=tail_ids, dim=0)  # tail entity embeddings, size: (batch_size, dimension)
         scores = torch.norm(head_embeds + rel_embeds - tail_embeds, p=self.norm, dim=1)  # size: (batch_size)
-        return torch.sigmoid(scores)
+        return scores
 
 
 class CompGCN(torch_geometric.nn.MessagePassing, ABC):
@@ -80,7 +81,7 @@ class CompGCN(torch_geometric.nn.MessagePassing, ABC):
     def message(self, x_j: FloatTensor, r: FloatTensor, edge_type: FloatTensor, y: FloatTensor) -> FloatTensor:
         # x_j: embeddings of source entities, size: (num_edges, in_dimension);
         edge_rel_embeds = torch.index_select(input=r, index=edge_type, dim=0)  # size: (num_edges, in_dimension)
-        messages = x_j - edge_rel_embeds  # size: (num_edges, in_dimension)
+        messages = x_j + edge_rel_embeds  # size: (num_edges, in_dimension)
 
         edge_weights = torch.index_select(input=self.weights, index=y, dim=0)  # size: (num_edges, in_dimension, out_dimension)
         messages = torch.bmm(messages.unsqueeze(1), edge_weights).squeeze(1)  # (num_edges, out_dimension)
