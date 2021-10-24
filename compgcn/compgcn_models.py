@@ -18,8 +18,7 @@ class CompgcnLP(torch.nn.Module):
         self.bases = torch.nn.Parameter(torch.FloatTensor(num_bases, dimension))  # base vectors for relations
         torch.nn.init.xavier_normal_(self.bases)
 
-        num_ori_relations = (num_relations - 1) // 2  # num_relations == num_original_rels * 2 + 1
-        self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_ori_relations, num_bases))  # coefficients of original relations
+        self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_relations, num_bases))  # coefficients of relations (num_original_rels * 2 + 1)
         torch.nn.init.xavier_normal_(self.coefficients)
 
         self.compgcn1 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
@@ -29,8 +28,7 @@ class CompgcnLP(torch.nn.Module):
         # get the embedding matrix of the current cluster
         x = torch.index_select(input=self.entity_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
         # compute embeddings of original and inverse relations
-        r = torch.matmul(self.coefficients, self.bases)  # size: (num_original_relations, dimension)
-        r = torch.cat((r, -1 * r), dim=0)  # size: (num_relations - 1, dimension)
+        r = torch.matmul(self.coefficients, self.bases)  # size: (num_relations, dimension)
 
         x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
@@ -63,17 +61,12 @@ class CompGCN(torch_geometric.nn.MessagePassing, ABC):
         self.relation_weight = torch.nn.Parameter(torch.FloatTensor(in_dimension, out_dimension))
         torch.nn.init.xavier_normal_(self.relation_weight)
 
-        # embedding of the self-loop relation
-        self.loop_embed = torch.nn.Parameter(torch.FloatTensor(1, in_dimension))
-        torch.nn.init.xavier_normal_(self.loop_embed)
-
     def forward(self, x: FloatTensor, r: FloatTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor) -> [FloatTensor, FloatTensor]:
         # x: input entity embeddings, size: (num_entities, in_dimension)
-        # r: input relation embeddings, size: (num_relations - 1, in_dimension)
+        # r: input relation embeddings, size: (num_relations, in_dimension)
         # edge_index: graph adjacency matrix in COO format, size: (2, num_edges)
         # edge_type: relation id list, and the order corresponds to edge_index, size: (num_edges)
         # y: relation type list: 0-original, 1-inverse, or 2-self-loop, size: (num_edges)
-        r = torch.cat((r, self.loop_embed), dim=0)  # size: (num_relations, in_dimension)
         x = self.propagate(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)  # propagate messages along edges and compute updated entity embeddings
         r = torch.matmul(r, self.relation_weight)  # size: (num_relations, out_dimension)
         return torch.tanh(x), r  # updated entity embeddings; updated_x size: (num_entities, out_dimension); updated_r size: (num_relations, out_dimension)]

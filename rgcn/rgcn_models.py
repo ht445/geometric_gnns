@@ -7,8 +7,7 @@ from torch import Tensor, LongTensor, FloatTensor
 
 
 class RgcnLP(torch.nn.Module):
-    def __init__(self, num_entities: int, num_relations: int, dimension: int, num_bases: int, aggr: str,
-                 dropout: float):
+    def __init__(self, num_entities: int, num_relations: int, dimension: int, num_bases: int, aggr: str, dropout: float):
         super(RgcnLP, self).__init__()
         self.dropout = dropout  # dropout rate
 
@@ -34,13 +33,13 @@ class RgcnLP(torch.nn.Module):
 
         return x  # size: (num_entities_in_the_current_batch, dimension)
 
-    def decode(self, x: FloatTensor, triples: LongTensor, lower_bound: FloatTensor, upper_bound: FloatTensor, mode: str) -> FloatTensor:
+    def decode(self, x: FloatTensor, triples: LongTensor) -> FloatTensor:
         head_ids = triples[:, 0]
         rel_ids = triples[:, 1]
         tail_ids = triples[:, 2]
         head_embeds = torch.index_select(input=x, index=head_ids, dim=0)  # head entity embeddings, size: (batch_size, dimension)
         tail_embeds = torch.index_select(input=x, index=tail_ids, dim=0)  # tail entity embeddings, size: (batch_size, dimension)
-        scores = self.distmult(head_embeds=head_embeds, tail_embeds=tail_embeds, rel_ids=rel_ids, lower_bound=lower_bound, upper_bound=upper_bound, mode=mode)  # size: (batch_size)
+        scores = self.distmult(head_embeds=head_embeds, tail_embeds=tail_embeds, rel_ids=rel_ids)  # size: (batch_size)
         return scores
 
 
@@ -89,11 +88,10 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
 class Distmult(torch.nn.Module):
     def __init__(self, num_relations: int, dimension: int):
         super(Distmult, self).__init__()
-        self.rel_embeds = torch.nn.Parameter(
-            torch.FloatTensor(num_relations, dimension))  # the "diagonal" of relation matrices
+        self.rel_embeds = torch.nn.Parameter(torch.FloatTensor(num_relations, dimension))  # the "diagonal" of relation matrices
         torch.nn.init.xavier_normal_(self.rel_embeds)
 
-    def forward(self, head_embeds: FloatTensor, tail_embeds: FloatTensor, rel_ids: LongTensor, lower_bound: FloatTensor, upper_bound: FloatTensor, mode: str) -> FloatTensor:
+    def forward(self, head_embeds: FloatTensor, tail_embeds: FloatTensor, rel_ids: LongTensor) -> FloatTensor:
         rel_embeds = torch.index_select(input=self.rel_embeds, index=rel_ids, dim=0)  # size: (batch_size, dimension)
         rel_matrices = torch.diag_embed(rel_embeds)  # size: (batch_size, dimension, dimension)
         scores = torch.bmm(
@@ -102,12 +100,4 @@ class Distmult(torch.nn.Module):
             ), tail_embeds.unsqueeze(2)
         ).view(-1)  # size: (batch_size)
 
-        if mode == "train":
-            pos_scores = scores[:upper_bound.size(0)]
-            pos_scores = torch.minimum(pos_scores, upper_bound)
-
-            neg_scores = scores[upper_bound.size(0):]
-            neg_scores = torch.maximum(neg_scores, lower_bound)
-            scores = torch.cat((pos_scores, neg_scores), dim=0)
-
-        return torch.sigmoid(scores)
+        return scores
