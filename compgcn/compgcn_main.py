@@ -7,11 +7,11 @@ import torch_geometric
 from datetime import datetime
 from compgcn_models import CompgcnLP
 from torch.utils.data import DataLoader
-from compgcn_utils import read_data, train_triple_pre_all, IndexSet
+from compgcn_utils import read_data, train_triple_pre, IndexSet
 
 
 class CompgcnMain:
-    def __init__(self, neg_num: int, num_subgraphs: int, dropout: float):
+    def __init__(self, neg_num: int, num_subgraphs: int, dropout: float, cluster_size: int, lr: float, weight_decay: float, margin: float):
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
@@ -19,19 +19,20 @@ class CompgcnMain:
         self.num_epochs = 100  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
-        self.lr = 0.0005  # learning rate
+        self.lr = lr  # learning rate
         self.dropout = dropout  # dropout rate
+        self.weight_decay = weight_decay
 
         self.aggr = "add"  # aggregation scheme to use in CompGCN
         self.embed_dim = 100  # entity embedding dimension
         self.norm = 2  # norm
-        self.margin = 1  # score margin
+        self.margin = margin  # score margin
 
         self.neg_num = neg_num  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
 
         self.num_subgraphs = num_subgraphs  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
-        self.cluster_size = 24  # number of subgraphs in each cluster
+        self.cluster_size = cluster_size  # number of subgraphs in each cluster
 
         self.batch_size = 128  # training batch size
         self.vt_batch_size = 64  # validation/test batch size (num of triples)
@@ -39,8 +40,8 @@ class CompgcnMain:
         self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:2")
-            self.eval_device = torch.device("cuda:3")
+            self.device = torch.device("cuda:3")
+            self.eval_device = torch.device("cuda:4")
         else:
             self.device = torch.device("cpu")
             self.eval_device = torch.device("cpu")
@@ -69,6 +70,7 @@ class CompgcnMain:
         print("- embedding dimension: `{}`".format(self.embed_dim))
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
+        print("- weight decay: `{}`".format(self.weight_decay))
         print("- dropout rate: `{}`".format(self.dropout))
         print("- number of bases: `{}`".format(self.num_bases))
         print("- compgcn aggregation scheme: `{}`".format(self.aggr))
@@ -140,7 +142,7 @@ class CompgcnMain:
         compgcn_lp.to(self.device)
 
         # use Adam as the optimizer
-        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # use binary cross entropy loss as the loss function
         criterion = torch.nn.MarginRankingLoss(margin=self.margin)
 
@@ -156,12 +158,13 @@ class CompgcnMain:
                 cluster_size.append(cluster.edge_index.size(1))
 
                 # filter inverse and self-loop triples and sample negative triples
-                pos_triples, neg_triples = train_triple_pre_all(ent_ids=cluster.x.squeeze(1),
+                pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
                                                             head_ids=cluster.edge_index[0, :],
                                                             rel_ids=cluster.edge_attr.squeeze(1),
                                                             tail_ids=cluster.edge_index[1, :],
                                                             neg_num=self.neg_num,
-                                                            self_rel_id=self.count["relation"]-1)
+                                                            hr2t=self.hr2t,
+                                                            tr2h=self.tr2h)
                 # pos_triples, size: (num_pos_triples_in_the_cluster, 3)
                 # neg_triples, size: (num_pos_triples_in_the_cluster * neg_num, 3)
 
@@ -383,13 +386,17 @@ class CompgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [1, 8]
+    neg_nums = [1, 4]
     num_subgraphs = [200, 400]
-    drop_outs = [0.2, 0.5]
-    params = list(product(neg_nums, num_subgraphs, drop_outs))
+    drop_outs = [0.2]
+    cluster_sizes = [24]
+    learning_rate = [0.01, 0.001, 0.0001]
+    weight_decay = [0.]
+    margins = [1., 2., 5.]
+    params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
 
     for param in params:
-        compgcn_main = CompgcnMain(neg_num=param[0], num_subgraphs=param[1], dropout=param[2])
+        compgcn_main = CompgcnMain(neg_num=param[0], num_subgraphs=param[1], dropout=param[2], cluster_size=param[3], lr=param[4], weight_decay=param[5], margin=param[6])
         config = {
             "data_path": compgcn_main.data_path,
             "model_path": compgcn_main.model_path,
@@ -397,6 +404,7 @@ if __name__ == "__main__":
             "num_epochs": compgcn_main.num_epochs,
             "valid_freq": compgcn_main.valid_freq,
             "learning_rate": compgcn_main.lr,
+            "weight decay": compgcn_main.weight_decay,
             "dropout": compgcn_main.dropout,
             "aggr": compgcn_main.aggr,
             "embed_dim": compgcn_main.embed_dim,
@@ -414,7 +422,7 @@ if __name__ == "__main__":
             "training_device": compgcn_main.device,
             "evaluation_device": compgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="compgcn", config=config, save_code=True, name="NN{}NS{}DO{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.dropout)):
+        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}LR{}MG{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.lr, compgcn_main.margin)):
             compgcn_main.print_config()
             compgcn_main.data_pre()
             compgcn_main.train()

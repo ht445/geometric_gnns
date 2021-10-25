@@ -90,7 +90,7 @@ def train_triple_pre_all(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: Lon
 
 def train_triple_pre(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: LongTensor, tail_ids: LongTensor, hr2t: dict, tr2h: dict, neg_num: int) -> [LongTensor]:
     # prepare positive triples
-    num_ori_triples = int((head_ids.size(0) - ent_ids.size(0)) / 2)
+    num_ori_triples = (head_ids.size(0) - ent_ids.size(0)) // 2
     pos_triples = torch.LongTensor(num_ori_triples, 3)
     triple_id = 0
     for edge_id in range(head_ids.size(0)):

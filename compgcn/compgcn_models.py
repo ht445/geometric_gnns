@@ -61,6 +61,9 @@ class CompGCN(torch_geometric.nn.MessagePassing, ABC):
         self.relation_weight = torch.nn.Parameter(torch.FloatTensor(in_dimension, out_dimension))
         torch.nn.init.xavier_normal_(self.relation_weight)
 
+        # batch normalization
+        self.bn = torch.nn.BatchNorm1d(out_dimension)
+
     def forward(self, x: FloatTensor, r: FloatTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor) -> [FloatTensor, FloatTensor]:
         # x: input entity embeddings, size: (num_entities, in_dimension)
         # r: input relation embeddings, size: (num_relations, in_dimension)
@@ -69,6 +72,8 @@ class CompGCN(torch_geometric.nn.MessagePassing, ABC):
         # y: relation type list: 0-original, 1-inverse, or 2-self-loop, size: (num_edges)
         x = self.propagate(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)  # propagate messages along edges and compute updated entity embeddings
         r = torch.matmul(r, self.relation_weight)  # size: (num_relations, out_dimension)
+
+        x = self.bn(x)
         return torch.tanh(x), r  # updated entity embeddings; updated_x size: (num_entities, out_dimension); updated_r size: (num_relations, out_dimension)]
 
     def message(self, x_j: FloatTensor, r: FloatTensor, edge_type: FloatTensor, y: FloatTensor) -> FloatTensor:

@@ -8,11 +8,11 @@ from itertools import product
 from datetime import datetime
 from rgcn_models import RgcnLP
 from torch.utils.data import DataLoader
-from rgcn_utils import read_data, IndexSet, train_triple_pre_all
+from rgcn_utils import read_data, IndexSet, train_triple_pre
 
 
 class RgcnMain:
-    def __init__(self, lr: float, batch_size: int, margin: float):
+    def __init__(self, lr: float, batch_size: int, margin: float, weight_decay: float):
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/rgcn_lp.pt"
 
@@ -20,6 +20,8 @@ class RgcnMain:
         self.num_epochs = 50  # number of training epochs
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
+        self.weight_decay = weight_decay  # learning rate
+
         self.dropout = 0.2  # dropout rate
         self.margin = margin  # margin
 
@@ -29,8 +31,8 @@ class RgcnMain:
         self.neg_num = 8  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation matrices in RGCN
 
-        self.num_subgraphs = 200  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
-        self.cluster_size = 24  # number of subgraphs in each batch
+        self.num_subgraphs = 400  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
+        self.cluster_size = 48  # number of subgraphs in each batch
 
         self.batch_size = batch_size  # batch size
         self.vt_batch_size = 12  # validation/test batch size
@@ -41,7 +43,7 @@ class RgcnMain:
         self.highest_mrr = 0.  # highest mrr in validation
 
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:4")
+            self.device = torch.device("cuda:5")
             self.eval_device = torch.device("cuda:5")
         else:
             self.device = torch.device("cpu")
@@ -70,6 +72,7 @@ class RgcnMain:
         print("- embedding dimension: `{}`".format(self.embed_dim))
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
+        print("- weight decay: `{}`".format(self.weight_decay))
         print("- dropout rate: `{}`".format(self.dropout))
         print("- margin: `{}`".format(self.margin))
         print("- number of bases: `{}`".format(self.num_bases))
@@ -138,7 +141,7 @@ class RgcnMain:
         rgcn_lp.to(self.device)
 
         # use Adam as the optimizer
-        optimizer = torch.optim.Adam(params=rgcn_lp.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(params=rgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # use margin ranking loss as the loss function
         criterion = torch.nn.MarginRankingLoss(margin=self.margin)
 
@@ -152,12 +155,13 @@ class RgcnMain:
                 cluster_size.append(cluster.edge_index.size(1))
 
                 # filter inverse and self-loop triples and sample negative triples
-                pos_triples, neg_triples = train_triple_pre_all(ent_ids=cluster.x.squeeze(1),
-                                                                head_ids=cluster.edge_index[0, :],
-                                                                rel_ids=cluster.edge_attr.squeeze(1),
-                                                                tail_ids=cluster.edge_index[1, :],
-                                                                neg_num=self.neg_num,
-                                                                self_rel_id=self.count["relation"] - 1)
+                pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
+                                                            head_ids=cluster.edge_index[0, :],
+                                                            rel_ids=cluster.edge_attr.squeeze(1),
+                                                            tail_ids=cluster.edge_index[1, :],
+                                                            neg_num=self.neg_num,
+                                                            hr2t=self.hr2t,
+                                                            tr2h=self.tr2h)
                 index_set = IndexSet(num_indices=pos_triples.size(0))
                 index_loader = DataLoader(dataset=index_set, batch_size=self.batch_size, shuffle=True)
 
@@ -191,7 +195,7 @@ class RgcnMain:
                     epoch_loss += batch_loss
 
             print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
-            print("\t * loss `{}`, time `{}`  ".format(epoch, epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
             if epoch % self.valid_freq == 0:
                 self.evaluate(mode="valid", epoch=epoch, model=rgcn_lp)
@@ -232,7 +236,7 @@ class RgcnMain:
         print("#### testing")
         test_model = RgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, dropout=self.dropout)
         test_model.load_state_dict(torch.load(self.model_path))
-        self.evaluate(mode="test", epoch=0, model=test_model)
+        self.evaluate(mode="test", epoch=self.num_epochs, model=test_model)
         print("-----")
         print("  ")
 
@@ -252,7 +256,7 @@ class RgcnMain:
             index_set = IndexSet(num_indices=self.count[mode])
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
-                triples = torch.index_select(input=self.triples[mode], index=batch, dim=0).to(self.eval_device)  # size: (batch_size, 3)
+                triples = torch.index_select(input=self.triples["train"], index=batch, dim=0).to(self.eval_device)  # size: (batch_size, 3)
 
                 if self.eval_sampling:
                     sampled_entities = torch.LongTensor(list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=self.count["entity"]), replacement=True,
@@ -394,20 +398,23 @@ class RgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    lrs = [0.001, 0.0005, 0.0001]
-    batch_sizes = [64, 128]
-    margins = [1, 5]
-    params = list(product(lrs, batch_sizes, margins))
+    lrs = [0.001]
+    batch_sizes = [512]
+    margins = [1]
+    weight_decays = [0.]
+
+    params = list(product(lrs, batch_sizes, margins, weight_decays))
 
     for param in params:
-        rgcn_main = RgcnMain(lr=param[0], batch_size=param[1], margin=param[2])
+        rgcn_main = RgcnMain(lr=param[0], batch_size=param[1], margin=param[2], weight_decay=param[3])
         config = {
             "data_path": rgcn_main.data_path,
             "model_path": rgcn_main.model_path,
             "from_pre": rgcn_main.from_pre,
             "num_epochs": rgcn_main.num_epochs,
             "valid_freq": rgcn_main.valid_freq,
-            "learning_rate": rgcn_main.lr,
+            "learning rate": rgcn_main.lr,
+            "weight decay": rgcn_main.weight_decay,
             "dropout": rgcn_main.dropout,
             "aggr": rgcn_main.aggr,
             "embed_dim": rgcn_main.embed_dim,
@@ -424,7 +431,8 @@ if __name__ == "__main__":
             "training_device": rgcn_main.device,
             "evaluation_device": rgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="rgcn", config=config, save_code=True, name="LR{}BS{}M{}".format(rgcn_main.lr, rgcn_main.batch_size, rgcn_main.margin)):
+        # with wandb.init(entity="ruijie", project="rgcn", config=config, save_code=True, name="LR{}WD{}BS{}M{}".format(rgcn_main.lr, rgcn_main.weight_decay, rgcn_main.batch_size, rgcn_main.margin)):
+        with wandb.init(entity="ruijie", project="rgcn", config=config, save_code=True, name="TrainSetAsValidTest"):
             rgcn_main.print_config()
             rgcn_main.data_pre()
             rgcn_main.train()

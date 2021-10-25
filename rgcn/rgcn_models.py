@@ -58,12 +58,16 @@ class RGCN(torch_geometric.nn.MessagePassing, ABC):
         self.bases = torch.nn.Parameter(torch.FloatTensor(self.num_bases, self.in_dimension, self.out_dimension))  # base matrices
         torch.nn.init.xavier_normal_(self.bases)
 
+        # batch normalization
+        self.bn = torch.nn.BatchNorm1d(out_dimension)
+
     def forward(self, x: FloatTensor, edge_index: LongTensor, edge_type: LongTensor) -> FloatTensor:
         # x: input entity embeddings, size: (num_entities, in_dimension);
         # edge_index: graph adjacency matrix in COO format, size: (2, num_edges);
         # edge_type: relation ids, the index is consistent with edge_index, size: (num_edges);
-        out = self.propagate(x=x, edge_index=edge_index, edge_type=edge_type)  # propagate messages along edges and compute updated entity embeddings
-        return torch.tanh(out)  # updated entity embeddings, size: (num_entities, out_dimension)
+        x = self.propagate(x=x, edge_index=edge_index, edge_type=edge_type)  # propagate messages along edges and compute updated entity embeddings
+        x = self.bn(x)
+        return torch.tanh(x)  # updated entity embeddings, size: (num_entities, out_dimension)
 
     def message(self, x_j: FloatTensor, edge_type: LongTensor = None) -> FloatTensor:
         # x_j: embeddings of source entities, size: (num_edges, in_dimension);
