@@ -390,7 +390,7 @@ if __name__ == "__main__":
     num_subgraphs = [200, 400]
     drop_outs = [0.2]
     cluster_sizes = [24]
-    learning_rate = [0.01, 0.001, 0.0001]
+    learning_rate = [0.001, 0.0001, 0.00001]
     weight_decay = [0.]
     margins = [1., 2., 5.]
     params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))

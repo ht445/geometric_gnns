@@ -12,7 +12,7 @@ from rgcn_utils import read_data, IndexSet, train_triple_pre
 
 
 class RgcnMain:
-    def __init__(self, lr: float, batch_size: int, margin: float, weight_decay: float):
+    def __init__(self, lr: float, batch_size: int, margin: float, weight_decay: float, num_subgraphs: int, cluster_size: int, neg_num: int):
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/rgcn_lp.pt"
 
@@ -28,11 +28,11 @@ class RgcnMain:
         self.aggr = "add"  # aggregation scheme to use in RGCN, "add" | "mean" | "max"
         self.embed_dim = 100  # entity embedding dimension
 
-        self.neg_num = 8  # number of negative triples for each positive triple
+        self.neg_num = neg_num  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation matrices in RGCN
 
-        self.num_subgraphs = 400  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
-        self.cluster_size = 48  # number of subgraphs in each batch
+        self.num_subgraphs = num_subgraphs  # partition the training graph into x subgraphs; please set it according to your GPU memory (if available)
+        self.cluster_size = cluster_size  # number of subgraphs in each batch
 
         self.batch_size = batch_size  # batch size
         self.vt_batch_size = 12  # validation/test batch size
@@ -256,7 +256,7 @@ class RgcnMain:
             index_set = IndexSet(num_indices=self.count[mode])
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
-                triples = torch.index_select(input=self.triples["train"], index=batch, dim=0).to(self.eval_device)  # size: (batch_size, 3)
+                triples = torch.index_select(input=self.triples[mode], index=batch, dim=0).to(self.eval_device)  # size: (batch_size, 3)
 
                 if self.eval_sampling:
                     sampled_entities = torch.LongTensor(list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=self.count["entity"]), replacement=True,
@@ -398,15 +398,18 @@ class RgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    lrs = [0.001]
-    batch_sizes = [512]
-    margins = [1]
+    neg_nums = [1, 4]
+    lrs = [0.001, 0.0001, 0.00001]
+    batch_sizes = [128]
+    margins = [1., 2., 5.]
     weight_decays = [0.]
+    num_subgraphs = [200, 400]
+    cluster_sizes = [24]
 
-    params = list(product(lrs, batch_sizes, margins, weight_decays))
+    params = list(product(lrs, batch_sizes, margins, weight_decays, num_subgraphs, cluster_sizes, neg_nums))
 
     for param in params:
-        rgcn_main = RgcnMain(lr=param[0], batch_size=param[1], margin=param[2], weight_decay=param[3])
+        rgcn_main = RgcnMain(lr=param[0], batch_size=param[1], margin=param[2], weight_decay=param[3], num_subgraphs=param[4], cluster_size=param[5], neg_num=param[6])
         config = {
             "data_path": rgcn_main.data_path,
             "model_path": rgcn_main.model_path,
@@ -431,8 +434,7 @@ if __name__ == "__main__":
             "training_device": rgcn_main.device,
             "evaluation_device": rgcn_main.eval_device,
         }
-        # with wandb.init(entity="ruijie", project="rgcn", config=config, save_code=True, name="LR{}WD{}BS{}M{}".format(rgcn_main.lr, rgcn_main.weight_decay, rgcn_main.batch_size, rgcn_main.margin)):
-        with wandb.init(entity="ruijie", project="rgcn", config=config, save_code=True, name="TrainSetAsValidTest"):
+        with wandb.init(entity="ruijie", project="new_rgcn", config=config, save_code=True, name="NN{}NS{}LR{}MG{}".format(rgcn_main.neg_num, rgcn_main.num_subgraphs, rgcn_main.lr, rgcn_main.margin)):
             rgcn_main.print_config()
             rgcn_main.data_pre()
             rgcn_main.train()
