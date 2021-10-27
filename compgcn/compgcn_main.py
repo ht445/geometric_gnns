@@ -40,7 +40,8 @@ class CompgcnMain:
         self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:3")
+            self.device1 = torch.device("cuda:3")
+            self.device2 = torch.device("cuda:4")
             self.eval_device = torch.device("cuda:4")
         else:
             self.device = torch.device("cpu")
@@ -83,7 +84,8 @@ class CompgcnMain:
         print("- margin: `{}`".format(self.margin))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
         print("- highest mrr: `{}`".format(self.highest_mrr))
-        print("- device: `{}`".format(self.device))
+        print("- device1: `{}`".format(self.device1))
+        print("- device2: `{}`".format(self.device2))
         print("- eval device: `{}`".format(self.eval_device))
         if self.eval_sampling:
             print("- evaluation sampling size: `{}`".format(self.eval_sample_size))
@@ -139,7 +141,7 @@ class CompgcnMain:
         compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         if self.from_pre:
             compgcn_lp.load_state_dict(torch.load(self.model_path))
-        compgcn_lp.to(self.device)
+        compgcn_lp.to(self.device1)
 
         # use Adam as the optimizer
         optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -181,15 +183,16 @@ class CompgcnMain:
                     optimizer.zero_grad()
 
                     # update entity and relation embeddings in the current cluster
-                    x, r = compgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device),
-                                             edge_index=cluster.edge_index.to(self.device),
-                                             edge_type=cluster.edge_attr.squeeze(1).to(self.device),
-                                             y=cluster.y.squeeze(1).to(self.device))
+                    x, r = compgcn_lp.encode(ent_ids=cluster.x.squeeze(1).to(self.device1),
+                                             edge_index=cluster.edge_index.to(self.device1),
+                                             edge_type=cluster.edge_attr.squeeze(1).to(self.device1),
+                                             y=cluster.y.squeeze(1).to(self.device1),
+                                             second_device=self.device2)
                     # x: (num_entities_in_the_current_cluster, dimension); r: (num_relations, dimension)
 
                     # compute scores for positive and negative triples
                     train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
-                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device))
+                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device2))
 
                     pos_scores = scores[:pos_batch_triples.size(0)]  # (num_pos_triples)
                     neg_scores = torch.mean(torch.transpose(scores[pos_batch_triples.size(0):].view(self.neg_num, -1), 0, 1), dim=1)
@@ -197,7 +200,7 @@ class CompgcnMain:
                     targets = torch.ones(pos_batch_triples.size(0)) * -1
 
                     # compute margin ranking loss
-                    batch_loss = criterion(input1=pos_scores, input2=neg_scores, target=targets.to(self.device))
+                    batch_loss = criterion(input1=pos_scores, input2=neg_scores, target=targets.to(self.device2))
 
                     if plot:
                         dot = torchviz.make_dot(batch_loss, params=dict(compgcn_lp.named_parameters()))
@@ -229,7 +232,7 @@ class CompgcnMain:
         model.eval()
         with torch.no_grad():
             model.cpu()
-            x, r = model.encode(ent_ids=self.graph.x.squeeze(1), edge_index=self.graph.edge_index, edge_type=self.graph.edge_attr.squeeze(1), y=self.graph.y.squeeze(1))
+            x, r = model.encode(ent_ids=self.graph.x.squeeze(1), edge_index=self.graph.edge_index, edge_type=self.graph.edge_attr.squeeze(1), y=self.graph.y.squeeze(1), second_device=torch.device("cpu"))
             x = x.to(self.eval_device)
             r = r.to(self.eval_device)
             model.to(self.eval_device)
@@ -380,17 +383,17 @@ class CompgcnMain:
                 torch.save(model.state_dict(), self.model_path)
                 print("\t * model saved to `{}` at epoch `{}`   ".format(self.model_path, epoch))
         model.train()
-        model.to(self.device)
+        model.to(self.device1)
 
 
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [1, 4]
-    num_subgraphs = [200, 400]
+    neg_nums = [1]
+    num_subgraphs = [100, 150, 200]
     drop_outs = [0.2]
-    cluster_sizes = [24]
-    learning_rate = [0.001, 0.0001, 0.00001]
+    cluster_sizes = [25]
+    learning_rate = [0.01, 0.005, 0.001, 0.0005]
     weight_decay = [0.]
     margins = [1., 2., 5.]
     params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
@@ -419,8 +422,9 @@ if __name__ == "__main__":
             "highest_mrr": compgcn_main.highest_mrr,
             "evaluation sampling": compgcn_main.eval_sampling,
             "sampling size": compgcn_main.eval_sample_size,
-            "training_device": compgcn_main.device,
-            "evaluation_device": compgcn_main.eval_device,
+            "training device": compgcn_main.device1,
+            "second training device": compgcn_main.device2,
+            "evaluation device": compgcn_main.eval_device,
         }
         with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}LR{}MG{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.lr, compgcn_main.margin)):
             compgcn_main.print_config()

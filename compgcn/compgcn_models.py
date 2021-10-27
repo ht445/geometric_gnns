@@ -24,7 +24,7 @@ class CompgcnLP(torch.nn.Module):
         self.compgcn1 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
         self.compgcn2 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
 
-    def encode(self, ent_ids: LongTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor) -> [FloatTensor]:
+    def encode(self, ent_ids: LongTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor, second_device: torch.device) -> [FloatTensor]:
         # get the embedding matrix of the current cluster
         x = torch.index_select(input=self.entity_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
         # compute embeddings of original and inverse relations
@@ -33,7 +33,8 @@ class CompgcnLP(torch.nn.Module):
         x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
 
-        x, r = self.compgcn2.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
+        self.compgcn2.to(second_device)
+        x, r = self.compgcn2.forward(x=x.to(second_device), r=r.to(second_device), edge_index=edge_index.to(second_device), edge_type=edge_type.to(second_device), y=y.to(second_device))
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
 
         return x, r
