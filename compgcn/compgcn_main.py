@@ -35,14 +35,14 @@ class CompgcnMain:
         self.cluster_size = cluster_size  # number of subgraphs in each cluster
 
         self.batch_size = 128  # training batch size
-        self.vt_batch_size = 64  # validation/test batch size (num of triples)
+        self.vt_batch_size = 128  # validation/test batch size (num of triples)
 
         self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
             self.device1 = torch.device("cuda:3")
             self.device2 = torch.device("cuda:4")
-            self.eval_device = torch.device("cuda:4")
+            self.eval_device = torch.device("cuda:5")
         else:
             self.device = torch.device("cpu")
             self.eval_device = torch.device("cpu")
@@ -210,7 +210,7 @@ class CompgcnMain:
 
                     batch_loss.backward()
                     optimizer.step()
-                    epoch_loss += batch_loss
+                    epoch_loss += float(batch_loss)
 
             print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
             print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     neg_nums = [1]
     num_subgraphs = [100, 150, 200]
     drop_outs = [0.2]
-    cluster_sizes = [25]
+    cluster_sizes = [20]
     learning_rate = [0.01, 0.005, 0.001, 0.0005]
     weight_decay = [0.]
     margins = [1., 2., 5.]

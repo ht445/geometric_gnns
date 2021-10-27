@@ -31,10 +31,11 @@ class CompgcnLP(torch.nn.Module):
         r = torch.matmul(self.coefficients, self.bases)  # size: (num_relations, dimension)
 
         x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
-        x = functional.dropout(input=x, p=self.dropout, training=self.training)
-
+        x = functional.dropout(input=x, p=self.dropout, training=self.training).to(second_device)
+        r = r.to(second_device)
         self.compgcn2.to(second_device)
-        x, r = self.compgcn2.forward(x=x.to(second_device), r=r.to(second_device), edge_index=edge_index.to(second_device), edge_type=edge_type.to(second_device), y=y.to(second_device))
+
+        x, r = self.compgcn2.forward(x=x, r=r, edge_index=edge_index.to(second_device), edge_type=edge_type.to(second_device), y=y.to(second_device))
         x = functional.dropout(input=x, p=self.dropout, training=self.training)
 
         return x, r
