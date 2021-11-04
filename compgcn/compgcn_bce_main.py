@@ -7,16 +7,16 @@ import torch_geometric
 from datetime import datetime
 from compgcn_models import CompgcnLP
 from torch.utils.data import DataLoader
-from compgcn_utils import read_data, train_triple_pre, IndexSet
+from compgcn_utils import read_data, IndexSet, pre_train_triples
 
 
 class CompgcnMain:
-    def __init__(self, neg_num: int, num_subgraphs: int, dropout: float, cluster_size: int, lr: float, weight_decay: float, margin: float):
+    def __init__(self, num_subgraphs: int, dropout: float, cluster_size: int, lr: float, weight_decay: float):
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 500  # number of training epochs
+        self.num_epochs = 100  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
@@ -26,9 +26,7 @@ class CompgcnMain:
         self.aggr = "add"  # aggregation scheme to use in CompGCN
         self.embed_dim = 100  # entity embedding dimension
         self.norm = 2  # norm
-        self.margin = margin  # score margin
 
-        self.neg_num = neg_num  # number of negative triples for each positive triple
         self.num_bases = 50  # number of bases for relation embeddings in CompGCN
 
         self.num_subgraphs = num_subgraphs  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
@@ -52,10 +50,10 @@ class CompgcnMain:
 
         self.count = None  # {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         self.triples = None  # {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
-        self.hr2t = None  # {(head_entity_id, relation_id): [tail_entity_ids, ...]}
-        self.tr2h = None  # {(tail_entity_id, relation_id): [head_entity_ids, ...]}
+        self.pos_tails = {}  # {(head_entity_id, relation_id): {positive_tail_entity_ids: None}}
 
-        self.graph = None  # the pytorch geometric graph consisting of training triples, Data(x, edge_index, edge_attr);
+        self.graph = None  # the pytorch geometric graph consisting of training triples
+
         self.cluster_data = None  # generated subgraphs
         self.cluster_loader = None  # subgraph batch loader
 
@@ -69,7 +67,6 @@ class CompgcnMain:
         else:
             print("- new training")
         print("- embedding dimension: `{}`".format(self.embed_dim))
-        print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
         print("- weight decay: `{}`".format(self.weight_decay))
         print("- dropout rate: `{}`".format(self.dropout))
@@ -81,7 +78,6 @@ class CompgcnMain:
         print("- validation frequency: `{}`".format(self.valid_freq))
         print("- training triple batch size: `{}`".format(self.batch_size))
         print("- norm: `{}`".format(self.norm))
-        print("- margin: `{}`".format(self.margin))
         print("- validation/test triple batch size: `{}`".format(self.vt_batch_size))
         print("- highest mrr: `{}`".format(self.highest_mrr))
         print("- device1: `{}`".format(self.device1))
@@ -94,41 +90,12 @@ class CompgcnMain:
 
     def data_pre(self):
         print("#### Preparing Data")
-        self.count, self.triples, self.hr2t, self.tr2h = read_data(self.data_path)
+        self.count, self.triples, self.graph, self.pos_tails = read_data(self.data_path)
         print("- number of entities: `{}`".format(self.count["entity"]))
-        print("- number of original relations: `{}`".format(self.count["relation"]))
+        print("- number of original relations: `{}`".format((self.count["relation"] - 1) // 2))
         print("- number of original training triples: `{}`".format(self.count["train"]))
         print("- number of validation triples: `{}`".format(self.count["valid"]))
         print("- number of testing triples: `{}`".format(self.count["test"]))
-
-        # create the training graph
-        edge_index = torch.LongTensor(2, self.count["train"])  # head and tail entity ids (changes after partitioning)
-        edge_attr = torch.LongTensor(self.count["train"], 1)  # relation ids (remains after partitioning)
-        y = torch.zeros(self.count["train"], 1, dtype=torch.long)  # relation types (remains after partitioning), 0: original, 1: inverse, 2: self-edge
-        for triple_id in range(self.count["train"]):
-            ids = self.triples["train"][triple_id, :]
-            edge_index[0, triple_id] = ids[0]
-            edge_attr[triple_id, 0] = ids[1]
-            edge_index[1, triple_id] = ids[2]
-
-        # add inverse relations
-        sources = edge_index[0, :]
-        targets = edge_index[1, :]
-        edge_index = torch.cat((edge_index, torch.cat((targets.unsqueeze(0), sources.unsqueeze(0)), dim=0)), dim=1)  # size: (2, num_train_triples * 2)
-        edge_attr = torch.cat((edge_attr, edge_attr + self.count["relation"]), dim=0)  # size: (num_train_triples * 2, 1)
-        y = torch.cat((y, torch.ones(self.count["train"], 1, dtype=torch.long)), dim=0)  # size: (num_train_triples * 2, 1)
-        self.count["relation"] = self.count["relation"] * 2  # double the number of relations
-
-        # add self-loops
-        self_loop_id = torch.LongTensor([self.count["relation"]])  # id of the self-loop relation
-        edge_index = torch.cat((edge_index, torch.cat((torch.arange(self.count["entity"]).unsqueeze(0), torch.arange(self.count["entity"]).unsqueeze(0)), dim=0)), dim=1)  # size: (2, num_train_triples * 2 + num_entities)
-        edge_attr = torch.cat((edge_attr, self_loop_id.repeat(edge_index.size(1) - edge_attr.size(0), 1)), dim=0)  # size: (num_train_triples * 2 + num_entities, 1)
-        y = torch.cat((y, torch.ones(edge_attr.size(0) - y.size(0), 1, dtype=torch.long) + 1), dim=0)  # size: (num_train_triples * 2 + num_entities, 1)
-        self.count["relation"] += 1
-
-        # construct a pytorch geometric data for the training graph
-        x = torch.arange(self.count["entity"]).unsqueeze(1)  # use x to store original entity ids since entity ids in edge_index will change after partitioning, size: (num_entities, 1)
-        self.graph = torch_geometric.data.Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
 
         # partition the training graph and instantiate the subgraph loader
         self.cluster_data = torch_geometric.data.ClusterData(data=self.graph, num_parts=self.num_subgraphs)
@@ -138,7 +105,7 @@ class CompgcnMain:
         print("#### Model Training and Validation")
 
         # instantiate the model
-        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=(self.count["relation"] - 1) // 2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout)
         if self.from_pre:
             compgcn_lp.load_state_dict(torch.load(self.model_path))
         compgcn_lp.to(self.device1)
@@ -146,12 +113,13 @@ class CompgcnMain:
         # use Adam as the optimizer
         optimizer = torch.optim.Adam(params=compgcn_lp.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         # use binary cross entropy loss as the loss function
-        criterion = torch.nn.MarginRankingLoss(margin=self.margin)
+        criterion = torch.nn.BCELoss()
 
         compgcn_lp.train()
         plot = True
 
         wandb.watch(compgcn_lp, criterion, log="all", log_freq=10)
+
         for epoch in range(self.num_epochs):
             print("* epoch {}".format(epoch))
             epoch_loss = 0.
@@ -159,27 +127,18 @@ class CompgcnMain:
             for step, cluster in enumerate(self.cluster_loader):
                 cluster_size.append(cluster.edge_index.size(1))
 
-                # filter inverse and self-loop triples and sample negative triples
-                pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
-                                                            head_ids=cluster.edge_index[0, :],
-                                                            rel_ids=cluster.edge_attr.squeeze(1),
-                                                            tail_ids=cluster.edge_index[1, :],
-                                                            neg_num=self.neg_num,
-                                                            hr2t=self.hr2t,
-                                                            tr2h=self.tr2h)
-                # pos_triples, size: (num_pos_triples_in_the_cluster, 3)
-                # neg_triples, size: (num_pos_triples_in_the_cluster * neg_num, 3)
+                heads, relations, targets = pre_train_triples(head_ids=cluster.edge_index[0, :],
+                                                              rel_ids=cluster.edge_attr.squeeze(1),
+                                                              tail_ids=cluster.edge_index[1, :],
+                                                              num_cluster_entities=cluster.x.size(0),
+                                                              self_rel_id=self.count["relation"]-1)
+                # heads, relations, size: (num_pos_triples_in_current_cluster)
+                # targets, size: (num_pos_triples_in_current_cluster, num_entities_in_current_cluster)
 
-                index_set = IndexSet(num_indices=pos_triples.size(0))
+                index_set = IndexSet(num_indices=heads.size(0))
                 index_loader = DataLoader(dataset=index_set, batch_size=self.batch_size, shuffle=True)
 
                 for batch in index_loader:
-                    pos_batch_triples = torch.index_select(input=pos_triples, index=batch, dim=0)
-                    neg_batch_triples = torch.index_select(input=neg_triples, index=batch * self.neg_num, dim=0)
-                    for i in range(self.neg_num):
-                        if i > 0:
-                            neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch * self.neg_num + i, dim=0)), dim=0)
-
                     optimizer.zero_grad()
 
                     # update entity and relation embeddings in the current cluster
@@ -187,20 +146,16 @@ class CompgcnMain:
                                              edge_index=cluster.edge_index.to(self.device1),
                                              edge_type=cluster.edge_attr.squeeze(1).to(self.device1),
                                              y=cluster.y.squeeze(1).to(self.device1),
-                                             second_device=self.device2)
-                    # x: (num_entities_in_the_current_cluster, dimension); r: (num_relations, dimension)
+                                             second_device=self.device2)  # x: (num_entities_in_current_cluster, dimension); r: (num_relations, dimension)
 
-                    # compute scores for positive and negative triples
-                    train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
-                    scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device2))
+                    # training batch
+                    batch_heads = torch.index_select(input=heads, index=batch, dim=0)  # size: (batch_size)
+                    batch_relations = torch.index_select(input=relations, index=batch, dim=0)  # size: (batch_size)
+                    batch_targets = torch.index_select(input=targets, index=batch, dim=0)  # size: (batch_size, num_entities_in_current_cluster)
 
-                    pos_scores = scores[:pos_batch_triples.size(0)]  # (num_pos_triples)
-                    neg_scores = torch.mean(torch.transpose(scores[pos_batch_triples.size(0):].view(self.neg_num, -1), 0, 1), dim=1)
-
-                    targets = torch.ones(pos_batch_triples.size(0)) * -1
-
-                    # compute margin ranking loss
-                    batch_loss = criterion(input1=pos_scores, input2=neg_scores, target=targets.to(self.device2))
+                    # compute loss
+                    loss = compgcn_lp.train_decode(x=x, r=r, batch_heads=batch_heads.to(self.device2), batch_relations=batch_relations.to(self.device2))  # size: (batch_size, num_entities_in_current_cluster)
+                    batch_loss = criterion(input=loss, target=batch_targets.to(self.device2))
 
                     if plot:
                         dot = torchviz.make_dot(batch_loss, params=dict(compgcn_lp.named_parameters()))
@@ -210,7 +165,7 @@ class CompgcnMain:
 
                     batch_loss.backward()
                     optimizer.step()
-                    epoch_loss += float(batch_loss)
+                    epoch_loss += batch_loss.item()
 
             print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
             print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -222,7 +177,7 @@ class CompgcnMain:
 
     def test(self):
         print("#### testing")
-        test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=(self.count["relation"] - 1) // 2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout)
         test_model.load_state_dict(torch.load(self.model_path))
         self.evaluate(mode="test", epoch=self.num_epochs, model=test_model)
         print("-----")
@@ -265,7 +220,7 @@ class CompgcnMain:
 
                 new_head_triples = torch.cat((test_heads, no_heads), dim=2).view(-1, 3).to(self.eval_device)  # size: (batch_size * (1 + eval_sample_size), 3)
 
-                new_head_scores = model.decode(x=x, r=r, triples=new_head_triples)  # size: (batch_size * (1 + eval_sample_size))
+                new_head_scores = model.eval_decode(x=x, r=r, triples=new_head_triples)  # size: (batch_size * (1 + eval_sample_size))
                 new_head_scores = new_head_scores.view(triples.size(0), 1 + self.eval_sample_size)  # size: (batch_size, (1 + eval_sample_size))
                 correct_scores = new_head_scores[:, 0].unsqueeze(1)  # (batch_size, 1)
                 if self.eval_device.type == "cuda":
@@ -296,7 +251,7 @@ class CompgcnMain:
 
                 new_tail_triples = torch.cat((no_tails, test_tails), dim=2).view(-1, 3).to(self.eval_device)  # size: (batch_size * (1 + eval_sample_size)), 3)
 
-                new_tail_scores = model.decode(x=x, r=r, triples=new_tail_triples)  # size: (batch_size * (1 + eval_sample_size)))
+                new_tail_scores = model.eval_decode(x=x, r=r, triples=new_tail_triples)  # size: (batch_size * (1 + eval_sample_size)))
                 new_tail_scores = new_tail_scores.view(triples.size(0), (1 + self.eval_sample_size))  # size: (batch_size, (1 + eval_sample_size))
                 correct_scores = new_tail_scores[:, 0].unsqueeze(1)  # size: (batch_size, 1)
                 if self.eval_device.type == "cuda":
@@ -389,17 +344,15 @@ class CompgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [1]
-    num_subgraphs = [100]
+    num_subgraphs = [100]#[100, 150, 200]
     drop_outs = [0.2]
-    cluster_sizes = [20]
-    learning_rate = [0.005]
+    cluster_sizes = [20]#[20]
+    learning_rate = [0.001] #[0.01, 0.005, 0.001, 0.0005]
     weight_decay = [0.]
-    margins = [1.]
-    params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
+    params = list(product(num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay))
 
     for param in params:
-        compgcn_main = CompgcnMain(neg_num=param[0], num_subgraphs=param[1], dropout=param[2], cluster_size=param[3], lr=param[4], weight_decay=param[5], margin=param[6])
+        compgcn_main = CompgcnMain(num_subgraphs=param[0], dropout=param[1], cluster_size=param[2], lr=param[3], weight_decay=param[4])
         config = {
             "data_path": compgcn_main.data_path,
             "model_path": compgcn_main.model_path,
@@ -412,8 +365,6 @@ if __name__ == "__main__":
             "aggr": compgcn_main.aggr,
             "embed_dim": compgcn_main.embed_dim,
             "norm": compgcn_main.norm,
-            "margin": compgcn_main.margin,
-            "neg_num": compgcn_main.neg_num,
             "num_bases": compgcn_main.num_bases,
             "num_subgraphs": compgcn_main.num_subgraphs,
             "cluster_size": compgcn_main.cluster_size,
@@ -426,7 +377,7 @@ if __name__ == "__main__":
             "second training device": compgcn_main.device2,
             "evaluation device": compgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}LR{}MG{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.lr, compgcn_main.margin)):
+        with wandb.init(entity="ruijie", project="test", config=config, save_code=True, name="NS{}LR{}".format(compgcn_main.num_subgraphs, compgcn_main.lr)):
             compgcn_main.print_config()
             compgcn_main.data_pre()
             compgcn_main.train()
