@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from torch import FloatTensor, LongTensor
 
 
-def read_data(data_path: str) -> []:
+def read_data(data_path: str):
     # get the number of entities, relations, and training/validation/testing triples
     count = {}
     for name in ["entity", "relation", "train", "valid", "test"]:
@@ -42,7 +42,26 @@ def read_data(data_path: str) -> []:
             tr2h[(tail, relation)].append(head)
             line = f.readline()
 
-    return count, triples, hr2t, tr2h
+    # mask correct heads and tails in tensors that would be used to compute filtered results
+    correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]),
+                     "test": torch.LongTensor(count["test"], count["entity"])}
+    correct_tails = {"valid": torch.LongTensor(count["valid"], count["entity"]),
+                     "test": torch.LongTensor(count["test"], count["entity"])}
+    for name in ["valid", "test"]:
+        current_triples = triples[name]  # size: (num_valid/test_triples, 3)
+        for i in range(count[name]):
+            current_triple = current_triples[i, :]  # size: (3)
+            current_head, current_relation, current_tail = int(current_triple[0]), int(current_triple[1]), int(current_triple[2])
+            correct_heads[name][i, :] = torch.arange(count["entity"])
+            if (current_tail, current_relation) in tr2h:
+                for correct_head in tr2h[(current_tail, current_relation)]:
+                    correct_heads[name][i, correct_head] = current_head
+            correct_tails[name][i, :] = torch.arange(count["entity"])
+            if (current_head, current_relation) in hr2t:
+                for correct_tail in hr2t[(current_head, current_relation)]:
+                    correct_tails[name][i, correct_tail] = current_tail
+
+    return count, triples, correct_heads, correct_tails
 
 # include inverse edges as training triples
 def train_triple_pre_all(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: LongTensor, tail_ids: LongTensor, neg_num: int, self_rel_id: int) -> [LongTensor]:
@@ -63,69 +82,31 @@ def train_triple_pre_all(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: Lon
             triple_id += 1
     assert triple_id == num_pos_triples, "triple_id: {}, num_pos_triples: {}, failed to collate all training triples; check train_triple_pre() in compgcn_utils.py".format(triple_id, num_pos_triples)
 
-    neg_triples = torch.LongTensor(num_pos_triples * neg_num, 3)  # negative triples
-    h_or_ts = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=2), replacement=True, num_samples=num_pos_triples * neg_num))  # if 0, corrupt the head; if 1, corrupt the tail;
-    corr_ents = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=ent_ids.size(0)), replacement=True, num_samples=num_pos_triples * neg_num))  # sampled corrupt entities
+    pos_triples = pos_triples.repeat(neg_num, 1)
+    num_pos_triples = num_pos_triples * neg_num
+
+    neg_triples = torch.LongTensor(num_pos_triples, 3)  # negative triples
+    h_or_ts = torch.LongTensor(num_pos_triples).random_(0, 2)  # if 0, corrupt the head; if 1, corrupt the tail;
+    corr_ents = torch.LongTensor(num_pos_triples).random_(0, ent_ids.size(0))  # sampled corrupt entities
     neg_triple_count = 0
     for triple_id in range(num_pos_triples):
         h_id = int(pos_triples[triple_id][0])  # cluster entity id
         r_id = int(pos_triples[triple_id][1])  # global relation id
         t_id = int(pos_triples[triple_id][2])  # cluster entity id
-        for i in range(neg_num):
-            sampled_position = int(h_or_ts[triple_id * neg_num + i])
-            sampled_entity = int(corr_ents[triple_id * neg_num + i])  # cluster entity id
-            if sampled_position == 0:  # corrupt the head
-                while (sampled_entity, r_id, t_id) in hrt2e:
-                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
-                neg_triples[triple_id * neg_num + i] = torch.LongTensor([sampled_entity, r_id, t_id])
-                neg_triple_count += 1
-            elif sampled_position == 1:  # corrupt the tail
-                while (h_id, r_id, sampled_entity) in hrt2e:
-                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
-                neg_triples[triple_id * neg_num + i] = torch.LongTensor([h_id, r_id, sampled_entity])
-                neg_triple_count += 1
-    assert neg_triple_count == num_pos_triples * neg_num, "failed to assemble negative triples; check train_triple_pre() in compgcn_utils.py"
+        sampled_position = int(h_or_ts[triple_id])
+        sampled_entity = int(corr_ents[triple_id])  # cluster entity id
+        if sampled_position == 0:  # corrupt the head
+            while (sampled_entity, r_id, t_id) in hrt2e:
+                sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
+            neg_triples[triple_id] = torch.LongTensor([sampled_entity, r_id, t_id])
+            neg_triple_count += 1
+        elif sampled_position == 1:  # corrupt the tail
+            while (h_id, r_id, sampled_entity) in hrt2e:
+                sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
+            neg_triples[triple_id] = torch.LongTensor([h_id, r_id, sampled_entity])
+            neg_triple_count += 1
+    assert neg_triple_count == num_pos_triples, "failed to assemble negative triples; check train_triple_pre() in compgcn_utils.py"
     return pos_triples, neg_triples
-
-def train_triple_pre(ent_ids: LongTensor, head_ids: LongTensor, rel_ids: LongTensor, tail_ids: LongTensor, hr2t: dict, tr2h: dict, neg_num: int) -> [LongTensor]:
-    # prepare positive triples
-    num_ori_triples = (head_ids.size(0) - ent_ids.size(0)) // 2
-    pos_triples = torch.LongTensor(num_ori_triples, 3)
-    triple_id = 0
-    for edge_id in range(head_ids.size(0)):
-        h_id = int(ent_ids[head_ids[edge_id]])  # global entity id
-        r_id = int(rel_ids[edge_id])
-        t_id = int(ent_ids[tail_ids[edge_id]])  # global entity id
-        if (h_id, r_id) in hr2t:
-            if t_id in hr2t[(h_id, r_id)]:
-                pos_triples[triple_id] = torch.LongTensor([head_ids[edge_id], r_id, tail_ids[edge_id]])  # store the triple with local entity ids when the triple exists in the training set
-                triple_id += 1
-    assert triple_id == num_ori_triples, "failed to find all original training triples; check train_triple_pre() in compgcn_utils.py"
-    # prepare negative triples
-    neg_triples = torch.LongTensor(num_ori_triples * neg_num, 3)
-    h_or_ts = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=2), replacement=True, num_samples=num_ori_triples * neg_num))  # if 0, corrupt the head; if 1, corrupt the tail;
-    corr_ents = list(torch.utils.data.RandomSampler(data_source=IndexSet(num_indices=ent_ids.size(0)), replacement=True, num_samples=num_ori_triples * neg_num))  # sampled corrupt entities
-    neg_triple_count = 0
-    for triple_id in range(num_ori_triples):
-        h_id = int(pos_triples[triple_id][0])  # local entity id
-        r_id = int(pos_triples[triple_id][1])
-        t_id = int(pos_triples[triple_id][2])  # local entity id
-        for i in range(neg_num):
-            sampled_position = int(h_or_ts[triple_id * neg_num + i])
-            sampled_entity = int(corr_ents[triple_id * neg_num + i])  # local entity id
-            if sampled_position == 0:  # corrupt the head
-                while sampled_entity == h_id or int(ent_ids[sampled_entity]) in tr2h[(int(ent_ids[t_id]), r_id)]:
-                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
-                neg_triples[triple_id * neg_num + i, :] = torch.LongTensor([sampled_entity, r_id, t_id])
-                neg_triple_count += 1
-            elif sampled_position == 1:  # corrupt the tail
-                while sampled_entity == t_id or int(ent_ids[sampled_entity]) in hr2t[(int(ent_ids[h_id]), r_id)]:
-                    sampled_entity = (sampled_entity + 1) % ent_ids.size(0)
-                neg_triples[triple_id * neg_num + i, :] = torch.LongTensor([h_id, r_id, sampled_entity])
-                neg_triple_count += 1
-    assert neg_triple_count == num_ori_triples * neg_num, "failed to assemble negative triples; check train_triple_pre() in compgcn_utils.py"
-    return pos_triples, neg_triples
-
 
 class IndexSet(Dataset):
     def __init__(self, num_indices):

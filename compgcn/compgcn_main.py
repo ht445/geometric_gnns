@@ -7,7 +7,7 @@ import torch_geometric
 from datetime import datetime
 from compgcn_models import CompgcnLP
 from torch.utils.data import DataLoader
-from compgcn_utils import read_data, train_triple_pre, IndexSet
+from compgcn_utils import read_data, train_triple_pre_all, IndexSet
 
 
 class CompgcnMain:
@@ -16,7 +16,7 @@ class CompgcnMain:
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
         self.from_pre = False  # True: continue training
-        self.num_epochs = 500  # number of training epochs
+        self.num_epochs = 20  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
@@ -52,8 +52,8 @@ class CompgcnMain:
 
         self.count = None  # {"entity": num_entities, "relation": num_relations, "train": num_train_triples, "valid": num_valid_triples, "test": num_test_triples};
         self.triples = None  # {"train": LongTensor(num_train_triples, 3), "valid": LongTensor(num_valid_triples, 3), "test": LongTensor(num_test_triples, 3)};
-        self.hr2t = None  # {(head_entity_id, relation_id): [tail_entity_ids, ...]}
-        self.tr2h = None  # {(tail_entity_id, relation_id): [head_entity_ids, ...]}
+        self.correct_heads = None  # {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
+        self.correct_tails = None  # {"valid": LongTensor(num_valid_triples, num_entities), "test": LongTensor(num_test_triples, num_entities)}
 
         self.graph = None  # the pytorch geometric graph consisting of training triples, Data(x, edge_index, edge_attr);
         self.cluster_data = None  # generated subgraphs
@@ -94,7 +94,7 @@ class CompgcnMain:
 
     def data_pre(self):
         print("#### Preparing Data")
-        self.count, self.triples, self.hr2t, self.tr2h = read_data(self.data_path)
+        self.count, self.triples, self.correct_heads, self.correct_tails = read_data(self.data_path)
         print("- number of entities: `{}`".format(self.count["entity"]))
         print("- number of original relations: `{}`".format(self.count["relation"]))
         print("- number of original training triples: `{}`".format(self.count["train"]))
@@ -138,7 +138,7 @@ class CompgcnMain:
         print("#### Model Training and Validation")
 
         # instantiate the model
-        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         if self.from_pre:
             compgcn_lp.load_state_dict(torch.load(self.model_path))
         compgcn_lp.to(self.device1)
@@ -160,25 +160,24 @@ class CompgcnMain:
                 cluster_size.append(cluster.edge_index.size(1))
 
                 # filter inverse and self-loop triples and sample negative triples
-                pos_triples, neg_triples = train_triple_pre(ent_ids=cluster.x.squeeze(1),
+                pos_triples, neg_triples = train_triple_pre_all(ent_ids=cluster.x.squeeze(1),
                                                             head_ids=cluster.edge_index[0, :],
                                                             rel_ids=cluster.edge_attr.squeeze(1),
                                                             tail_ids=cluster.edge_index[1, :],
                                                             neg_num=self.neg_num,
-                                                            hr2t=self.hr2t,
-                                                            tr2h=self.tr2h)
-                # pos_triples, size: (num_pos_triples_in_the_cluster, 3)
-                # neg_triples, size: (num_pos_triples_in_the_cluster * neg_num, 3)
+                                                            self_rel_id=self.count["relation"]-1)
+                # pos_triples, neg_triples, size: (num_pos_triples * neg_num, 3)
 
-                index_set = IndexSet(num_indices=pos_triples.size(0))
+                index_set = IndexSet(num_indices=pos_triples.size(0)//self.neg_num)
                 index_loader = DataLoader(dataset=index_set, batch_size=self.batch_size, shuffle=True)
 
                 for batch in index_loader:
                     pos_batch_triples = torch.index_select(input=pos_triples, index=batch, dim=0)
-                    neg_batch_triples = torch.index_select(input=neg_triples, index=batch * self.neg_num, dim=0)
+                    neg_batch_triples = torch.index_select(input=neg_triples, index=batch, dim=0)
                     for i in range(self.neg_num):
                         if i > 0:
-                            neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch * self.neg_num + i, dim=0)), dim=0)
+                            pos_batch_triples = torch.cat((pos_batch_triples, torch.index_select(input=pos_triples, index=batch + i * (pos_triples.size(0)//self.neg_num), dim=0)), dim=0)
+                            neg_batch_triples = torch.cat((neg_batch_triples, torch.index_select(input=neg_triples, index=batch + i * (pos_triples.size(0)//self.neg_num), dim=0)), dim=0)
 
                     optimizer.zero_grad()
 
@@ -194,8 +193,8 @@ class CompgcnMain:
                     train_triples = torch.cat((pos_batch_triples, neg_batch_triples), dim=0)
                     scores = compgcn_lp.decode(x=x, r=r, triples=train_triples.to(self.device2))
 
-                    pos_scores = scores[:pos_batch_triples.size(0)]  # (num_pos_triples)
-                    neg_scores = torch.mean(torch.transpose(scores[pos_batch_triples.size(0):].view(self.neg_num, -1), 0, 1), dim=1)
+                    pos_scores = scores[:pos_batch_triples.size(0)]
+                    neg_scores = scores[pos_batch_triples.size(0):]
 
                     targets = torch.ones(pos_batch_triples.size(0)) * -1
 
@@ -210,7 +209,7 @@ class CompgcnMain:
 
                     batch_loss.backward()
                     optimizer.step()
-                    epoch_loss += float(batch_loss)
+                    epoch_loss += batch_loss.item()
 
             print("\t * number of triples in each cluster, min: {}, mean: {}, max: {}".format(min(cluster_size), 0 if len(cluster_size) == 0 else sum(cluster_size) / len(cluster_size), max(cluster_size)))
             print("\t * loss `{}`, time `{}`  ".format(epoch_loss, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -222,7 +221,7 @@ class CompgcnMain:
 
     def test(self):
         print("#### testing")
-        test_model = CompgcnLP(num_entities=self.count["entity"], num_relations=self.count["relation"], dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        test_model = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         test_model.load_state_dict(torch.load(self.model_path))
         self.evaluate(mode="test", epoch=self.num_epochs, model=test_model)
         print("-----")
@@ -246,6 +245,8 @@ class CompgcnMain:
             index_loader = DataLoader(dataset=index_set, batch_size=self.vt_batch_size, shuffle=False)
             for batch in index_loader:
                 triples = torch.index_select(input=self.triples[mode], index=batch, dim=0).to(self.eval_device)  # size: (batch_size, 3)
+                correct_heads = torch.index_select(input=self.correct_heads[mode], index=batch, dim=0).to(self.eval_device)  # (batch_size, num_entities)
+                correct_tails = torch.index_select(input=self.correct_tails[mode], index=batch, dim=0).to(self.eval_device)  # (batch_size, num_entities)
 
                 if self.eval_sampling:
                     sampled_entities = torch.LongTensor(list(
@@ -263,21 +264,26 @@ class CompgcnMain:
 
                 no_heads = triples[:, 1:3].unsqueeze(1).repeat(1, 1 + self.eval_sample_size, 1).to(self.eval_device)  # (batch_size, 1 + eval_sample_size, 2)
 
-                new_head_triples = torch.cat((test_heads, no_heads), dim=2).view(-1, 3).to(self.eval_device)  # size: (batch_size * (1 + eval_sample_size), 3)
+                new_head_triples = torch.cat((test_heads, no_heads), dim=2).view(-1, 3).to(self.eval_device)  # size: (batch_size * (1 + eval_sample_size), 3) => head, rel, tail
 
                 new_head_scores = model.decode(x=x, r=r, triples=new_head_triples)  # size: (batch_size * (1 + eval_sample_size))
                 new_head_scores = new_head_scores.view(triples.size(0), 1 + self.eval_sample_size)  # size: (batch_size, (1 + eval_sample_size))
                 correct_scores = new_head_scores[:, 0].unsqueeze(1)  # (batch_size, 1)
+                new_head_scores = new_head_scores[:, 1:]  # (batch_size, eval_sample_size)
                 if self.eval_device.type == "cuda":
-                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of random entities having higher scores than correct ones, size: (batch_size * num_false_positive_per_batch)
                     false_equals = torch.nonzero(torch.cuda.BoolTensor(new_head_scores == correct_scores), as_tuple=True)[0]
+                    if not self.eval_sampling:
+                        new_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (batch_size, num_entities)
+                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of random entities having higher scores than correct ones, size: (batch_size * num_false_positive_per_batch)
                 else:
-                    false_positives = torch.nonzero(torch.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of random entities having higher scores than correct ones
                     false_equals = torch.nonzero(torch.BoolTensor(new_head_scores == correct_scores), as_tuple=True)[0]
+                    if not self.eval_sampling:
+                        new_head_scores = torch.gather(input=new_head_scores, dim=1, index=correct_heads)  # (batch_size, num_entities)
+                    false_positives = torch.nonzero(torch.BoolTensor(new_head_scores < correct_scores), as_tuple=True)[0]  # indices of random entities having higher scores than correct ones
                 false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
                 head_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.eval_device), index=false_positives, dim=0)  # number of false positives for each valid/test triple, (batch_size)
                 head_equals = torch_scatter.scatter(src=torch.ones(false_equals.size(0)).to(torch.long).to(self.eval_device), index=false_equals, dim=0)
-                head_equals = head_equals - 2
+                head_equals = head_equals - 1
 
                 if all_head_ranks is None:
                     all_head_ranks = head_ranks.to(torch.float)
@@ -299,16 +305,21 @@ class CompgcnMain:
                 new_tail_scores = model.decode(x=x, r=r, triples=new_tail_triples)  # size: (batch_size * (1 + eval_sample_size)))
                 new_tail_scores = new_tail_scores.view(triples.size(0), (1 + self.eval_sample_size))  # size: (batch_size, (1 + eval_sample_size))
                 correct_scores = new_tail_scores[:, 0].unsqueeze(1)  # size: (batch_size, 1)
+                new_tail_scores = new_tail_scores[:, 1:]  # size: (batch_size, eval_sample_size)
                 if self.eval_device.type == "cuda":
-                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of sampled entities having higher scores than correct ones
                     false_equals = torch.nonzero(torch.cuda.BoolTensor(new_tail_scores == correct_scores), as_tuple=True)[0]
+                    if not self.eval_sampling:
+                        new_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (batch_size, num_entities)
+                    false_positives = torch.nonzero(torch.cuda.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of sampled entities having higher scores than correct ones
                 else:
-                    false_positives = torch.nonzero(torch.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of sampled entities having higher scores than correct ones
                     false_equals = torch.nonzero(torch.BoolTensor(new_tail_scores == correct_scores), as_tuple=True)[0]
+                    if not self.eval_sampling:
+                        new_tail_scores = torch.gather(input=new_tail_scores, dim=1, index=correct_tails)  # (batch_size, num_entities)
+                    false_positives = torch.nonzero(torch.BoolTensor(new_tail_scores < correct_scores), as_tuple=True)[0]  # indices of sampled entities having higher scores than correct ones
                 false_positives = torch.cat((false_positives, torch.arange(correct_scores.size(0)).to(self.eval_device)), dim=0)
                 tail_ranks = torch_scatter.scatter(src=torch.ones(false_positives.size(0)).to(torch.long).to(self.eval_device), index=false_positives,dim=0)  # number of false positives for each valid/test triple, (batch_size)
                 tail_equals = torch_scatter.scatter(src=torch.ones(false_equals.size(0)).to(torch.long).to(self.eval_device), index=false_equals, dim=0)
-                tail_equals = tail_equals - 2
+                tail_equals = tail_equals - 1
 
                 if all_tail_ranks is None:
                     all_tail_ranks = tail_ranks.to(torch.float)
@@ -347,7 +358,7 @@ class CompgcnMain:
                 t_hit3 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 3)).size(0) / all_tail_ranks.size(0)  # tail hit@3
                 t_hit10 = torch.nonzero(torch.BoolTensor(all_tail_ranks <= 10)).size(0) / all_tail_ranks.size(0)  # tail hit@10
 
-            print_dic = {"valid": "validation results (raw)", "test": "testing results (raw)"}
+            print_dic = {"valid": "validation results (filtered)", "test": "testing results (filtered)"}
             if mode == "valid":
                 print("\t * {}  at epoch `{}`".format(print_dic[mode], epoch))
             else:
@@ -389,13 +400,13 @@ class CompgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [1]
+    neg_nums = [64, 128]
     num_subgraphs = [100]
     drop_outs = [0.2]
     cluster_sizes = [20]
     learning_rate = [0.005]
     weight_decay = [0.]
-    margins = [1.]
+    margins = [1., 2.]
     params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
 
     for param in params:

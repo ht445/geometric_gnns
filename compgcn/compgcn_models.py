@@ -6,7 +6,7 @@ from torch import LongTensor, FloatTensor
 
 
 class CompgcnLP(torch.nn.Module):
-    def __init__(self, num_entities: int, num_relations: int, dimension: int, num_bases: int, aggr: str, norm: int, dropout: float, margin: float):
+    def __init__(self, num_entities: int, num_ori_relations: int, dimension: int, num_bases: int, aggr: str, norm: int, dropout: float, margin: float):
         super(CompgcnLP, self).__init__()
         self.norm = norm
         self.dropout = dropout
@@ -18,8 +18,11 @@ class CompgcnLP(torch.nn.Module):
         self.bases = torch.nn.Parameter(torch.FloatTensor(num_bases, dimension))  # base vectors for relations
         torch.nn.init.xavier_normal_(self.bases)
 
-        self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_relations, num_bases))  # coefficients of relations (num_original_rels * 2 + 1)
+        self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_ori_relations, num_bases))  # coefficients of relations
         torch.nn.init.xavier_normal_(self.coefficients)
+
+        self.self_rel_embed = torch.nn.Parameter(torch.FloatTensor(1, dimension))  # self-loop relation embedding
+        torch.nn.init.xavier_normal_(self.self_rel_embed)
 
         self.compgcn1 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
         self.compgcn2 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
@@ -28,7 +31,9 @@ class CompgcnLP(torch.nn.Module):
         # get the embedding matrix of the current cluster
         x = torch.index_select(input=self.entity_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
         # compute embeddings of original and inverse relations
-        r = torch.matmul(self.coefficients, self.bases)  # size: (num_relations, dimension)
+        r = torch.matmul(self.coefficients, self.bases)  # size: (num_ori_relations, dimension)
+        r = torch.cat((r, -1. * r), dim=0)
+        r = torch.cat((r, self.self_rel_embed), dim=0)
 
         x, r = self.compgcn1.forward(x=x, r=r, edge_index=edge_index, edge_type=edge_type, y=y)
         x = functional.dropout(input=x, p=self.dropout, training=self.training).to(second_device)
