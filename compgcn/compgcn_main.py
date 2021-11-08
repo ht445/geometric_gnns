@@ -15,7 +15,7 @@ class CompgcnMain:
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
-        self.from_pre = True  # True: continue training
+        self.from_pre = False  # True: continue training
         self.num_epochs = 100  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
@@ -23,7 +23,7 @@ class CompgcnMain:
         self.dropout = dropout  # dropout rate
         self.weight_decay = weight_decay
 
-        self.aggr = "add"  # aggregation scheme to use in CompGCN
+        self.aggr = "mean"  # aggregation scheme to use in CompGCN
         self.init_dim = 100  # dimension of input entity embeddings
         self.hid_dim = 100  # dimension of hidden entity embeddings
         self.out_dim = 100  # dimension of output entity embeddings
@@ -36,10 +36,10 @@ class CompgcnMain:
         self.num_subgraphs = num_subgraphs  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
         self.cluster_size = cluster_size  # number of subgraphs in each cluster
 
-        self.batch_size = 64  # training batch size
+        self.batch_size = 128  # training batch size
         self.vt_batch_size = 128  # validation/test batch size (num of triples)
 
-        self.highest_mrr = 0.2291  # highest validation mrr during training
+        self.highest_mrr = 0.  # highest validation mrr during training
 
         if torch.cuda.is_available():
             self.device1 = torch.device("cuda:3")
@@ -404,10 +404,10 @@ class CompgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [256]
-    num_subgraphs = [50]
+    neg_nums = [128]
+    num_subgraphs = [20]
     drop_outs = [0.2]
-    cluster_sizes = [10]
+    cluster_sizes = [3]
     learning_rate = [0.0005]
     weight_decay = [0.]
     margins = [1.]
