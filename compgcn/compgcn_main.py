@@ -15,8 +15,8 @@ class CompgcnMain:
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
-        self.from_pre = False  # True: continue training
-        self.num_epochs = 20  # number of training epochs
+        self.from_pre = True  # True: continue training
+        self.num_epochs = 100  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
@@ -24,20 +24,22 @@ class CompgcnMain:
         self.weight_decay = weight_decay
 
         self.aggr = "add"  # aggregation scheme to use in CompGCN
-        self.embed_dim = 100  # entity embedding dimension
+        self.init_dim = 100  # dimension of input entity embeddings
+        self.hid_dim = 100  # dimension of hidden entity embeddings
+        self.out_dim = 100  # dimension of output entity embeddings
         self.norm = 2  # norm
         self.margin = margin  # score margin
 
         self.neg_num = neg_num  # number of negative triples for each positive triple
-        self.num_bases = 50  # number of bases for relation embeddings in CompGCN
+        self.num_bases = -1  # number of bases for relation embeddings in CompGCN
 
         self.num_subgraphs = num_subgraphs  # partition the training graph into x subgraphs; please set it according to your GPU memory (if applicable)
         self.cluster_size = cluster_size  # number of subgraphs in each cluster
 
-        self.batch_size = 128  # training batch size
+        self.batch_size = 64  # training batch size
         self.vt_batch_size = 128  # validation/test batch size (num of triples)
 
-        self.highest_mrr = 0.  # highest validation mrr during training
+        self.highest_mrr = 0.2291  # highest validation mrr during training
 
         if torch.cuda.is_available():
             self.device1 = torch.device("cuda:3")
@@ -68,7 +70,9 @@ class CompgcnMain:
             print("- continue training based on: `{}`".format(self.model_path))
         else:
             print("- new training")
-        print("- embedding dimension: `{}`".format(self.embed_dim))
+        print("- input embedding dimension: `{}`".format(self.init_dim))
+        print("- hidden embedding dimension: `{}`".format(self.hid_dim))
+        print("- output embedding dimension: `{}`".format(self.out_dim))
         print("- number of negative triples: `{}`".format(self.neg_num))
         print("- learning rate: `{}`".format(self.lr))
         print("- weight decay: `{}`".format(self.weight_decay))
@@ -138,7 +142,7 @@ class CompgcnMain:
         print("#### Model Training and Validation")
 
         # instantiate the model
-        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        compgcn_lp = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, init_dimension=self.init_dim, hid_dimension=self.hid_dim, out_dimension=self.out_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         if self.from_pre:
             compgcn_lp.load_state_dict(torch.load(self.model_path))
         compgcn_lp.to(self.device1)
@@ -221,7 +225,7 @@ class CompgcnMain:
 
     def test(self):
         print("#### testing")
-        test_model = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, dimension=self.embed_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
+        test_model = CompgcnLP(num_entities=self.count["entity"], num_ori_relations=(self.count["relation"] - 1)//2, init_dimension=self.init_dim, hid_dimension=self.hid_dim, out_dimension=self.out_dim, num_bases=self.num_bases, aggr=self.aggr, norm=self.norm, dropout=self.dropout, margin=self.margin)
         test_model.load_state_dict(torch.load(self.model_path))
         self.evaluate(mode="test", epoch=self.num_epochs, model=test_model)
         print("-----")
@@ -400,13 +404,13 @@ class CompgcnMain:
 if __name__ == "__main__":
     wandb.login()
 
-    neg_nums = [64, 128]
-    num_subgraphs = [100]
+    neg_nums = [256]
+    num_subgraphs = [50]
     drop_outs = [0.2]
-    cluster_sizes = [20]
-    learning_rate = [0.005]
+    cluster_sizes = [10]
+    learning_rate = [0.0005]
     weight_decay = [0.]
-    margins = [1., 2.]
+    margins = [1.]
     params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
 
     for param in params:
@@ -421,7 +425,9 @@ if __name__ == "__main__":
             "weight decay": compgcn_main.weight_decay,
             "dropout": compgcn_main.dropout,
             "aggr": compgcn_main.aggr,
-            "embed_dim": compgcn_main.embed_dim,
+            "init_embed_dim": compgcn_main.init_dim,
+            "hid_embed_dim": compgcn_main.hid_dim,
+            "out_embed_dim": compgcn_main.out_dim,
             "norm": compgcn_main.norm,
             "margin": compgcn_main.margin,
             "neg_num": compgcn_main.neg_num,
@@ -437,7 +443,7 @@ if __name__ == "__main__":
             "second training device": compgcn_main.device2,
             "evaluation device": compgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}LR{}MG{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.lr, compgcn_main.margin)):
+        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}CS{}LR{}BS{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.cluster_size, compgcn_main.lr, compgcn_main.batch_size)):
             compgcn_main.print_config()
             compgcn_main.data_pre()
             compgcn_main.train()

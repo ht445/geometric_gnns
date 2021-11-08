@@ -1,4 +1,5 @@
 import torch
+from collections import defaultdict
 from torch.utils.data import Dataset
 from torch import FloatTensor, LongTensor
 
@@ -25,22 +26,23 @@ def read_data(data_path: str):
                 tmp_count += 1
                 line = f.readline()
 
-    #  store training triples in dictionaries (will be used in negative sampling)
-    hr2t = {}  # {(head_entity_id, relation_id): [tail_entity_ids, ...]}
-    tr2h = {}  # {(tail_entity_id, relation_id): [head_entity_ids, ...]}
-    with open(data_path + "train2id.txt") as f:
-        f.readline()
-        line = f.readline()
-        while line:
-            head, tail, relation = line.rstrip("\n").split(" ")
-            head, tail, relation = int(head), int(tail), int(relation)
-            if (head, relation) not in hr2t:
-                hr2t[(head, relation)] = []
-            hr2t[(head, relation)].append(tail)
-            if (tail, relation) not in tr2h:
-                tr2h[(tail, relation)] = []
-            tr2h[(tail, relation)].append(head)
+    #  store all positive triples in dictionaries
+    hr2t = defaultdict(list) # {(head_entity_id, relation_id): [tail_entity_ids, ...]}
+    tr2h = defaultdict(list)  # {(tail_entity_id, relation_id): [head_entity_ids, ...]}
+    for name in ["train", "valid", "test"]:
+        with open(data_path + name + "2id.txt") as f:
+            f.readline()
             line = f.readline()
+            while line:
+                head, tail, relation = line.rstrip("\n").split(" ")
+                head, tail, relation = int(head), int(tail), int(relation)
+
+                hr2t[(head, relation)].append(tail)
+                hr2t[(tail, relation + count["relation"])].append(head)
+
+                tr2h[(tail, relation)].append(head)
+                tr2h[(head, relation + count["relation"])].append(tail)
+                line = f.readline()
 
     # mask correct heads and tails in tensors that would be used to compute filtered results
     correct_heads = {"valid": torch.LongTensor(count["valid"], count["entity"]),

@@ -6,32 +6,39 @@ from torch import LongTensor, FloatTensor
 
 
 class CompgcnLP(torch.nn.Module):
-    def __init__(self, num_entities: int, num_ori_relations: int, dimension: int, num_bases: int, aggr: str, norm: int, dropout: float, margin: float):
+    def __init__(self, num_entities: int, num_ori_relations: int, init_dimension: int, hid_dimension: int, out_dimension: int, num_bases: int, aggr: str, norm: int, dropout: float, margin: float):
         super(CompgcnLP, self).__init__()
         self.norm = norm
         self.dropout = dropout
         self.margin = margin
+        self.num_bases = num_bases
 
-        self.entity_embeds = torch.nn.Parameter(torch.FloatTensor(num_entities, dimension))  # entity embeddings, size: (num_entities, dimension)
+        self.entity_embeds = torch.nn.Parameter(torch.FloatTensor(num_entities, init_dimension))  # entity embeddings
         torch.nn.init.xavier_normal_(self.entity_embeds)
 
-        self.bases = torch.nn.Parameter(torch.FloatTensor(num_bases, dimension))  # base vectors for relations
-        torch.nn.init.xavier_normal_(self.bases)
+        if self.num_bases > 0:
+            self.bases = torch.nn.Parameter(torch.FloatTensor(self.num_bases, init_dimension))  # base vectors for relations
+            torch.nn.init.xavier_normal_(self.bases)
+            self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_ori_relations, self.num_bases))  # coefficients of relations
+            torch.nn.init.xavier_normal_(self.coefficients)
+        else:
+            self.rel_embeds = torch.nn.Parameter(torch.FloatTensor(num_ori_relations, init_dimension))  # embeddings of original relations
+            torch.nn.init.xavier_normal_(self.rel_embeds)
 
-        self.coefficients = torch.nn.Parameter(torch.FloatTensor(num_ori_relations, num_bases))  # coefficients of relations
-        torch.nn.init.xavier_normal_(self.coefficients)
-
-        self.self_rel_embed = torch.nn.Parameter(torch.FloatTensor(1, dimension))  # self-loop relation embedding
+        self.self_rel_embed = torch.nn.Parameter(torch.FloatTensor(1, init_dimension))  # self-loop relation embedding
         torch.nn.init.xavier_normal_(self.self_rel_embed)
 
-        self.compgcn1 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
-        self.compgcn2 = CompGCN(in_dimension=dimension, out_dimension=dimension, aggr=aggr)
+        self.compgcn1 = CompGCN(in_dimension=init_dimension, out_dimension=hid_dimension, aggr=aggr)
+        self.compgcn2 = CompGCN(in_dimension=hid_dimension, out_dimension=out_dimension, aggr=aggr)
 
     def encode(self, ent_ids: LongTensor, edge_index: LongTensor, edge_type: LongTensor, y: LongTensor, second_device: torch.device) -> [FloatTensor]:
         # get the embedding matrix of the current cluster
         x = torch.index_select(input=self.entity_embeds, index=ent_ids, dim=0)  # size: (num_entities_in_the_current_batch, dimension)
         # compute embeddings of original and inverse relations
-        r = torch.matmul(self.coefficients, self.bases)  # size: (num_ori_relations, dimension)
+        if self.num_bases > 0:
+            r = torch.matmul(self.coefficients, self.bases)  # size: (num_ori_relations, dimension)
+        else:
+            r = self.rel_embeds  # size: (num_ori_relations, dimension)
         r = torch.cat((r, -1. * r), dim=0)
         r = torch.cat((r, self.self_rel_embed), dim=0)
 
