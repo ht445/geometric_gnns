@@ -15,8 +15,8 @@ class CompgcnMain:
         self.data_path = "../data/FB15K237/"
         self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
 
-        self.from_pre = False  # True: continue training
-        self.num_epochs = 100  # number of training epochs
+        self.from_pre = True  # True: continue training
+        self.num_epochs = 20  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
@@ -39,14 +39,16 @@ class CompgcnMain:
         self.batch_size = 128  # training batch size
         self.vt_batch_size = 128  # validation/test batch size (num of triples)
 
-        self.highest_mrr = 0.  # highest validation mrr during training
+        self.highest_mrr = 0.2497  # highest validation mrr during training
+        self.use_gpu = True
 
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and self.use_gpu:
             self.device1 = torch.device("cuda:3")
             self.device2 = torch.device("cuda:4")
             self.eval_device = torch.device("cuda:5")
         else:
-            self.device = torch.device("cpu")
+            self.device1 = torch.device("cpu")
+            self.device2 = torch.device("cpu")
             self.eval_device = torch.device("cpu")
 
         self.eval_sampling = False  # True: sample candidate entities in validation and test
@@ -407,8 +409,8 @@ if __name__ == "__main__":
     neg_nums = [128]
     num_subgraphs = [20]
     drop_outs = [0.2]
-    cluster_sizes = [3]
-    learning_rate = [0.0005]
+    cluster_sizes = [4]
+    learning_rate = [0.0001]
     weight_decay = [0.]
     margins = [1.]
     params = list(product(neg_nums, num_subgraphs, drop_outs, cluster_sizes, learning_rate, weight_decay, margins))
@@ -443,7 +445,7 @@ if __name__ == "__main__":
             "second training device": compgcn_main.device2,
             "evaluation device": compgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}CS{}LR{}BS{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.cluster_size, compgcn_main.lr, compgcn_main.batch_size)):
+        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="C-NN{}NS{}CS{}LR{}BS{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.cluster_size, compgcn_main.lr, compgcn_main.batch_size)):
             compgcn_main.print_config()
             compgcn_main.data_pre()
             compgcn_main.train()
