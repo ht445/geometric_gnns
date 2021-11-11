@@ -13,10 +13,10 @@ from compgcn_utils import read_data, train_triple_pre_all, IndexSet
 class CompgcnMain:
     def __init__(self, neg_num: int, num_subgraphs: int, dropout: float, cluster_size: int, lr: float, weight_decay: float, margin: float):
         self.data_path = "../data/FB15K237/"
-        self.model_path = "../pretrained/FB15K237/compgcn_lp.pt"
+        self.model_path = "../pretrained/FB15K237/compgcn_lp_0.0001.pt"
 
-        self.from_pre = True  # True: continue training
-        self.num_epochs = 20  # number of training epochs
+        self.from_pre = False  # True: continue training
+        self.num_epochs = 50  # number of training epochs
 
         self.valid_freq = 1  # do validation every x training epochs
         self.lr = lr  # learning rate
@@ -39,7 +39,7 @@ class CompgcnMain:
         self.batch_size = 128  # training batch size
         self.vt_batch_size = 128  # validation/test batch size (num of triples)
 
-        self.highest_mrr = 0.2497  # highest validation mrr during training
+        self.highest_mrr = 0.  # highest validation mrr during training
         self.use_gpu = True
 
         if torch.cuda.is_available() and self.use_gpu:
@@ -407,9 +407,9 @@ if __name__ == "__main__":
     wandb.login()
 
     neg_nums = [128]
-    num_subgraphs = [20]
+    num_subgraphs = [12]
     drop_outs = [0.2]
-    cluster_sizes = [4]
+    cluster_sizes = [2]
     learning_rate = [0.0001]
     weight_decay = [0.]
     margins = [1.]
@@ -445,7 +445,7 @@ if __name__ == "__main__":
             "second training device": compgcn_main.device2,
             "evaluation device": compgcn_main.eval_device,
         }
-        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="C-NN{}NS{}CS{}LR{}BS{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.cluster_size, compgcn_main.lr, compgcn_main.batch_size)):
+        with wandb.init(entity="ruijie", project="new_compgcn", config=config, save_code=True, name="NN{}NS{}CS{}LR{}BS{}".format(compgcn_main.neg_num, compgcn_main.num_subgraphs, compgcn_main.cluster_size, compgcn_main.lr, compgcn_main.batch_size)):
             compgcn_main.print_config()
             compgcn_main.data_pre()
             compgcn_main.train()

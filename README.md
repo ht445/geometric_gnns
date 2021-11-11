@@ -4,15 +4,15 @@
 
 Two popular Graph Convolutional Networks (GCNs) are implemented:
 
-- [Relational Graph Convolutional Networks (RGCNs)](https://arxiv.org/abs/1703.06103)
-
-> <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/rgcn.png" alt="RGCN Arch" width="40%"> </p>
-> Schlichtkrull, Michael, et al. "Modeling relational data with graph convolutional networks." European semantic web conference. Springer, Cham, 2018.
-
 - [Composition-based Graph Convolutional Networks (CompGCNs)](https://arxiv.org/abs/1911.03082).
 
 > <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/compgcn.png" alt="CompGCN Arch" width="50%"> </p>
 > Vashishth, Shikhar, et al. "Composition-based Multi-Relational Graph Convolutional Networks." International Conference on Learning Representations. 2019.
+
+- [Relational Graph Convolutional Networks (RGCNs)](https://arxiv.org/abs/1703.06103)
+
+> <p align="center"> <img src="https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/others/rgcn.png" alt="RGCN Arch" width="40%"> </p>
+> Schlichtkrull, Michael, et al. "Modeling relational data with graph convolutional networks." European semantic web conference. Springer, Cham, 2018.
 
 The implementation is based on [Pytorch Geometric](https://github.com/rusty1s/pytorch_geometric).
 
@@ -43,35 +43,25 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 
 | Model | MRR | MR | Hits@1 | Hits@3 | Hits@10 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| [RGCN](https://arxiv.org/abs/1703.06103) | 0.248 | - | 0.153 | 0.258 | 0.414 | 
 | [CompGCN](https://arxiv.org/abs/1911.03082) | 0.355 | 197 | 0.264 | 0.390 | 0.535 |
+| [RGCN](https://arxiv.org/abs/1703.06103) | 0.248 | - | 0.153 | 0.258 | 0.414 | 
 
 ## Experimental Results
 
-### RGCN
-
-- Testing results of the rgcn implementation:
-
-|  metric  |  head  |  tail  |  mean  |  
-|  ----  |  ----  |  ----  |  ----  |  
-|  mean reciprocal rank (MRR)  |  `0.26442909240722656`  |  `0.28572818636894226`  |  **`0.2750786542892456`**  |
-|  hits@1  |  `0.2517834457148441`  |  `0.2642919964819701`  |  **`0.2580377210984071`**  |  
-|  hits@3  |  `0.2595524284178638`  |  `0.2789015928857618`  |  **`0.26922701065181276`**  |  
-|  hits@10  |  `0.2842274992670771`  |  `0.32199745920062545`  |  `0.30311247923385126`  |  
-
-- The results of MRR, hits@1, and hits@3 are better than those reported in the original paper.
-- The training takes about 1 hour on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
-- [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/2dc89c75fe480c5379408aea972d38217dc62e5d/logs/rgcn_lp.aug.2021.md)
-- [Pretrained model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/946622e922547515373291267745c8594ce1cf6d/pretrained/FB15K237/rgcn_lp.pt)
-
 ### CompGCN
 
-|  metric  |  head  |  tail  |  mean  |  
-|  ----  |  ----  |  ----  |  ----  |  
-|  mean rank (MR)  |  `673.3828735351562`  |  `2129.835693359375`  |  `1401.6092529296875`  |  
-|  mean reciprocal rank (MRR)  |  `0.12702743709087372`  |  `0.10114094614982605`  |  `0.11408419162034988`  |  
-|  hits@1  |  `0.0467463880777359`  |  `0.05306652560830116`  |  `0.04990645498037338`  |  
-|  hits@3  |  `0.18180181086063385`  |  `0.11458759009838104`  |  `0.14819470047950745`  |  
-|  hits@10  |  `0.23247618973255157`  |  `0.1872071623802185`  |  `0.20984166860580444`  |
+|  metric  |  head  |  tail  |  mean  |
+|  ----  |  ----  |  ----  |  ----  |
+|  mean reciprocal rank (MRR)  |  `0.15498019754886627`  |  `0.3260224759578705`  |  `0.24050134420394897`  |
+|  mean rank (MR)  |  `398.7995300292969`  |  `201.8601531982422`  |  `300.329833984375`  |
+|  hits@1  |  `0.0870712401055409`  |  `0.23370468093423238`  |  `0.16038796051988663`  |
+|  hits@3  |  `0.1679370663539529`  |  `0.35922994234339883`  |  `0.26358350434867583`  |
+|  hits@10  |  `0.2876478061174631`  |  `0.5122153816085214`  |  `0.39993159386299226`  |
 
-- [commit](https://github.com/ruijie-wang-uzh/geometric_gnns/commit/407e6699a42ee5b7c57cb0251eb69a8e25fe7079)
+- The training (50 epochs) took about 14 hours on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
+- [Running log]()
+- [Pretrained model]()
+
+### RGCN
+
+... ...
