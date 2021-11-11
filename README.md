@@ -59,8 +59,8 @@ To train on GPUs with limited memory, the training graph can be partitioned into
 |  hits@10  |  `0.2876478061174631`  |  `0.5122153816085214`  |  `0.39993159386299226`  |
 
 - The training (50 epochs) took about 14 hours on a GeForce RTX 2080 Ti GPU with 11019 MiB Memory.
-- [Running log]()
-- [Pretrained model]()
+- [Running log](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/logs/compgcn_final.md)
+- [Pretrained model](https://github.com/ruijie-wang-uzh/geometric_gnns/blob/master/pretrained/FB15K237/compgcn_lp_0.0001.pt)
 
 ### RGCN
 
