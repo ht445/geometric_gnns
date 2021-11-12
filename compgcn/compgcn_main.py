@@ -43,9 +43,9 @@ class CompgcnMain:
         self.use_gpu = True
 
         if torch.cuda.is_available() and self.use_gpu:
-            self.device1 = torch.device("cuda:3")
-            self.device2 = torch.device("cuda:4")
-            self.eval_device = torch.device("cuda:5")
+            self.device1 = torch.device("cuda:0")
+            self.device2 = torch.device("cuda:1")
+            self.eval_device = torch.device("cuda:2")
         else:
             self.device1 = torch.device("cpu")
             self.device2 = torch.device("cpu")
